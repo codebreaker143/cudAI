@@ -54,7 +54,6 @@ import ClearIcon from "@mui/icons-material/Clear";
 import { useMain } from "../../context/MainContext";
 import "react-edit-text/dist/index.css";
 import EditableText from "../utils/EditableTextArea";
-import { SERVER_URL } from "../../public/constant";
 import ReactJson from "@microlink/react-json-view";
 const ReactPlayer = _ReactPlayer as unknown as React.FC<ReactPlayerProps>;
 export const Title2String = (
@@ -1015,50 +1014,6 @@ const Page = () => {
         };
     }, [popOpen]);
 
-    const handlePolish = async () => {
-        try {
-            if (cutTaskName) {
-                console.log("Polish it:", cutTaskName);
-                const response = await fetch(
-                    `http://localhost:5328/polish_task_name_and_description`,
-                    {
-                        method: "POST",
-                        headers: {
-                            "Content-Type": "application/json",
-                        },
-                        body: JSON.stringify({
-                            task_name: cutTaskName,
-                            //task_description: cutDescription,
-                        }),
-                    }
-                );
-                if (!response.ok) {
-                    throw new Error("Network response was not ok");
-                } else {
-                    const resjson = await response.json();
-                    const modifiedTaskName = resjson.modified_task_name;
-                    // const modifiedTaskDescription =
-                    //     resjson.modified_task_description;
-
-                    console.log(
-                        "Polished:",
-                        modifiedTaskName
-                        //modifiedTaskDescription
-                    );
-
-                    // Update the frontend state with the polished values
-                    setCutTaskName(modifiedTaskName);
-                    // setCutDescription(modifiedTaskDescription);
-                }
-            } else {
-                showError("Task name is required");
-            }
-        } catch (error) {
-            console.error("Error polishing:", error);
-            showError(`"Error polishing:", ${error}`);
-        }
-    };
-
     return (
         <div className="h-full max-h-full overflow-y-auto w-full max-w-full overflow-x-hidden flex flex-col">
             <div className="flex items-center mx-2 md:mx-4">
@@ -1278,19 +1233,6 @@ const Page = () => {
                                             }}
                                         >
                                             Save
-                                        </Button>
-                                        <Button
-                                            onClick={handlePolish}
-                                            variant="solid"
-                                            sx={{
-                                                flex: 1,
-                                                mr: 1,
-                                                py: 0.5,
-                                                fontSize: "0.875rem",
-                                                height: "32px",
-                                            }}
-                                        >
-                                            Polish by AI
                                         </Button>
                                     </Grid>
                                 </Box>{" "}

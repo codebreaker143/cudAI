@@ -15,10 +15,12 @@ class MetadataManager:
         self.recording_path = recording_path
 
         self.metadata = uname()._asdict()
+
         if "node" in self.metadata:
             del self.metadata["node"]
 
         main_monitor = get_monitors()[0]
+
         self.metadata["screen_width"] = main_monitor.width
         self.metadata["screen_height"] = main_monitor.height
 
@@ -30,27 +32,47 @@ class MetadataManager:
                     for item in wmi.WMI().Win32_ComputerSystem():
                         self.metadata["model"] = item.Model
                         break
+
                 case "Darwin":
                     import subprocess
 
                     model = (
-                        subprocess.check_output(["sysctl", "-n", "hw.model"])
+                        subprocess.check_output(
+                            ["sysctl", "-n", "hw.model"]
+                        )
                         .decode()
                         .strip()
                     )
+
                     self.metadata["model"] = model
+
                 case "Linux":
-                    with open("/sys/devices/virtual/dmi/id/product_name", "r") as f:
+                    with open(
+                        "/sys/devices/virtual/dmi/id/product_name",
+                        "r",
+                    ) as f:
                         self.metadata["model"] = f.read().strip()
-        except:
+
+        except Exception:
             self.metadata["model"] = "Unknown"
 
-        self.metadata["scroll_direction"] = -1 if natural_scrolling else 1
+        self.metadata["scroll_direction"] = (
+            -1 if natural_scrolling else 1
+        )
 
     def save_metadata(self):
-        metadata_path = os.path.join(self.recording_path, "metadata.json")
+        metadata_path = os.path.join(
+            self.recording_path,
+            "metadata.json",
+        )
+
         with open(metadata_path, "w") as f:
-            json.dump(self.metadata, f, indent=4, ensure_ascii=False)
+            json.dump(
+                self.metadata,
+                f,
+                indent=4,
+                ensure_ascii=False,
+            )
 
     def collect(self):
         self.metadata["start_time"] = self._get_time_stamp()
@@ -58,11 +80,13 @@ class MetadataManager:
     def end_collect(self):
         self.metadata["stop_time"] = self._get_time_stamp()
 
-    def add_obs_record_state_timings(self, record_state_events: dict[str, float]):
-        self.metadata["obs_record_state_timings"] = record_state_events
-
     def _get_time_stamp(self):
-        return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        return datetime.now().strftime(
+            "%Y-%m-%d %H:%M:%S"
+        )
 
-    def set_video_start_timestamp(self, timestamp: float):
+    def set_video_start_timestamp(
+        self,
+        timestamp: float,
+    ):
         self.metadata["video_start_timestamp"] = timestamp

@@ -104,8 +104,6 @@ export default function Sidebar({ tasks, init_open }: SidebarProps) {
         showInfo,
         showSuccess,
         myos,
-        allVerifyTasks,
-        fetchNewTasksToVerify,
         username,
         user_id,
         userData,
@@ -129,23 +127,12 @@ export default function Sidebar({ tasks, init_open }: SidebarProps) {
     const [visibleUploadedIconIndex, setVisibleUploadedIconIndex] = useState<
         number | null
     >(null);
-    const [isEnablingWebSocket, setIsEnablingWebSocket] = useState(false);
-
-    // Missing state variables for verify tasks and UI
-    const [toVerifyTasksList, setToVerifyTasksList] = useState(allVerifyTasks);
-    const [visibleVerifyIconIndex, setVisibleVerifyIconIndex] = useState<number | null>(null);
-    const [toVerifyTasksProgress, setToVerifyTasksProgress] = useState<Record<number, number>>({});
-    
+ 
     // Refs for user data and UI elements
     const LoginStatusRef = React.useRef(!!user_id);
     const user_avatar_urlRef = React.useRef("");
     const user_idRef = React.useRef(user_id);
     const usernameRef = React.useRef(username);
-    const LinearProgressRef = React.useRef<HTMLDivElement>(null);
-
-    useEffect(() => {
-        setToVerifyTasksList(allVerifyTasks);
-    }, [allVerifyTasks]);
 
     useEffect(() => {
         LoginStatusRef.current = !!user_id;
@@ -233,59 +220,6 @@ export default function Sidebar({ tasks, init_open }: SidebarProps) {
             if (params.recording_name === recordingName) {
                 navigate("/");
             }
-        }
-    };
-
-    const handleDeleteVerifyRecording = async (
-        recordingName: string,
-        taskName: string
-    ) => {
-        try {
-            const response = await fetch(
-                `http://localhost:5328/api/recording/${recordingName}/delete_local_verify_recording`
-            );
-            const result = await response.json();
-
-            if (response.ok) {
-                showSuccess(result.success);
-            } else {
-                showError(result.error);
-            }
-        } catch (error) {
-            showError("Network error or server is down.");
-        } finally {
-            showInfo(`Task ${taskName} deleted`);
-            setToVerifyTasksList(
-                toVerifyTasksList.filter(
-                    (task) => task.recording_id !== recordingName
-                )
-            );
-            fetchNewTasksToVerify();
-            if (params.recording_name === recordingName) {
-                navigate("/");
-            }
-        }
-    };
-
-    const handleEnableOBSWebSocket = async () => {
-        setIsEnablingWebSocket(true);
-        try {
-            const response = await fetch(
-                "http://localhost:5328/enable_obs_websocket",
-                {
-                    method: "GET",
-                }
-            );
-            const result = await response.json();
-            if (response.ok) {
-                showSuccess("OBS WebSocket enabled successfully");
-            } else {
-                showError(result.error || "Failed to enable OBS WebSocket");
-            }
-        } catch (error) {
-            showError("Network error or server is down.");
-        } finally {
-            setIsEnablingWebSocket(false);
         }
     };
 
@@ -744,144 +678,7 @@ export default function Sidebar({ tasks, init_open }: SidebarProps) {
                             </Toggler>
                         </ListItem>
                     )}
-                    {false && (
-                        <ListItem nested>
-                            <Toggler
-                                renderToggle={({ open, setOpen }) => (
-                                    <ListItemButton>
-                                        <AssignmentRoundedIcon />
-                                        <ListItemContent
-                                            sx={{
-                                                display: "flex",
-                                                justifyContent: "space-between",
-                                            }}
-                                        >
-                                            <Typography level="title-sm">
-                                                Verify
-                                            </Typography>
-                                            <div className="flex gap-1"></div>
-                                        </ListItemContent>
-                                        <KeyboardArrowDownIcon
-                                            sx={{
-                                                transform: open
-                                                    ? "rotate(180deg)"
-                                                    : "none",
-                                            }}
-                                            onClick={() => setOpen(!open)}
-                                        />
-                                    </ListItemButton>
-                                )}
-                            >
-                                <List sx={{ gap: 0.5 }}>
-                                    {toVerifyTasksList.map((recording) => (
-                                        <ListItem
-                                            key={recording.recording_id}
-                                            onMouseEnter={() =>
-                                                setVisibleVerifyIconIndex(
-                                                    toVerifyTasksList.indexOf(
-                                                        recording
-                                                    )
-                                                )
-                                            }
-                                            onMouseLeave={() =>
-                                                setVisibleVerifyIconIndex(null)
-                                            }
-                                        >
-                                            <ListItemButton className="flex flex-row justify-between">
-                                                {recording.downloaded ? (
-                                                    recording.visualizable ? (
-                                                        <Link
-                                                            to={`reviewtasks/${recording.recording_id}`}
-                                                            style={{
-                                                                maxWidth: "80%",
-                                                            }}
-                                                        >
-                                                            <div className="flex flex-col gap-0">
-                                                                <p className="text-sm font-semibold text-black truncate dark:text-white">
-                                                                    {
-                                                                        recording.task_name
-                                                                    }
-                                                                </p>
-                                                                <p className="text-[10px] text-zinc-600 truncate dark:text-zinc-400">
-                                                                    {
-                                                                        recording.upload_timestamp
-                                                                    }
-                                                                </p>
-                                                            </div>
-                                                        </Link>
-                                                    ) : (
-                                                        <div
-                                                            style={{
-                                                                maxWidth: "80%",
-                                                            }}
-                                                            className="flex flex-col gap-0"
-                                                        >
-                                                            <div className="flex flex-col gap-0">
-                                                                <p className="text-sm font-semibold text-zinc-600 truncate dark:text-zinc-400">
-                                                                    <del>
-                                                                        {
-                                                                            recording.task_name
-                                                                        }
-                                                                    </del>
-                                                                </p>
-                                                                <p className="text-[10px] text-zinc-600 truncate dark:text-zinc-400">
-                                                                    BROKEN
-                                                                </p>
-                                                            </div>
-                                                        </div>
-                                                    )
-                                                ) : (
-                                                    <div
-                                                        style={{
-                                                            maxWidth: "80%",
-                                                        }}
-                                                        className="flex flex-col gap-0"
-                                                    >
-                                                        <div className="flex flex-col gap-0 w-full">
-                                                            <p className="text-sm font-semibold text-black truncate dark:text-white">
-                                                                {
-                                                                    recording.task_name
-                                                                }
-                                                            </p>
-                                                            <LinearProgress
-                                                                ref={
-                                                                    LinearProgressRef
-                                                                }
-                                                                className="w-full"
-                                                                determinate
-                                                                value={
-                                                                    toVerifyTasksProgress[
-                                                                        toVerifyTasksList.indexOf(
-                                                                            recording
-                                                                        )
-                                                                    ]
-                                                                }
-                                                            />
-                                                        </div>
-                                                    </div>
-                                                )}{" "}
-                                                {visibleVerifyIconIndex ===
-                                                    toVerifyTasksList.indexOf(
-                                                        recording
-                                                    ) && (
-                                                    <DeleteForeverIcon
-                                                        className=""
-                                                        onClick={() =>
-                                                            handleDeleteVerifyRecording(
-                                                                recording.recording_id,
-                                                                recording.task_name
-                                                            )
-                                                        }
-                                                    />
-                                                )}
-                                            </ListItemButton>
-                                        </ListItem>
-                                    ))}
-                                </List>
-                            </Toggler>
-                        </ListItem>
-                    )}
-                </List>
+                                    </List>
 
                 <List
                     size="sm"
@@ -905,17 +702,6 @@ export default function Sidebar({ tasks, init_open }: SidebarProps) {
                     </ListItem>
                     {myos === "darwin" && (
                         <ListItem>
-                            <ListItemButton
-                                onClick={handleEnableOBSWebSocket}
-                                disabled={isEnablingWebSocket}
-                            >
-                                {isEnablingWebSocket ? (
-                                    <CircularProgress size="sm" />
-                                ) : (
-                                    <SupportRoundedIcon />
-                                )}
-                                OBS configure
-                            </ListItemButton>
                         </ListItem>
                     )}
                     <ListItem>

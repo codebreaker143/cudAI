@@ -11,7 +11,6 @@ from core.logger import logger
 from services.config_service import ConfigService
 from services.recording_service import RecordingService
 from services.file_service import FileService
-from services.obs_service import ObsService
 from services.upload_service import UploadService
 from controllers.recording_controller import RecordingController
 from controllers.websocket_controller import WebSocketController
@@ -54,7 +53,6 @@ class AgentNetBackend:
 
     def _initialize_services(self):
         """Initialize all service instances."""
-        self.obs_service = ObsService()
         self.recording_service = RecordingService(self.socketio)
         self.upload_service = UploadService(self.socketio)
         self.file_service = FileService()
@@ -65,17 +63,15 @@ class AgentNetBackend:
             self.recording_service, self.file_service, self.socketio
         )
         self.websocket_controller = WebSocketController(
-            self.recording_service, self.obs_service, self.upload_service
+            self.recording_service, self.upload_service
         )
         self.browser_controller = BrowserController(self.file_service)
-        self.system_controller = SystemController(self.obs_service)
+        self.system_controller = SystemController()
 
     def _setup_routes(self):
         routes = [
             # System Endpoints
             ("/api/check_permissions", self.system_controller.check_permissions),
-            ("/enable_obs_websocket", self.system_controller.enable_obs_websocket, {"methods": ["GET"]}),
-            ("/polish_task_name_and_description", self.system_controller.polish_task_name_and_description_endpoint, {"methods": ["POST"]}),
             ("/api/recording/save_task", self.system_controller.save_task_endpoint, {"methods": ["POST"]}),
             # Recording Endpoints
             ("/api/recordings", self.recording_controller.get_user_recordings_list),
@@ -137,9 +133,6 @@ class AgentNetBackend:
             # Stop recording if active
             if hasattr(self.recording_service, "recorder_thread"):
                 self.recording_service.stop_recording()
-
-            # Shutdown OBS
-            self.obs_service.shutdown()
 
             # Stop SocketIO
             if hasattr(self, "socketio"):

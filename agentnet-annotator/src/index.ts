@@ -11,11 +11,11 @@ import {
   Menu,
   nativeImage,
   Tray,
+  systemPreferences,
 } from "electron";
 import { spawn, ChildProcess, execSync } from "child_process";
 import axios from "axios";
 import path from "path";
-import { SERVER_URL } from "./public/constant";
 import { createTray, StartRecording, StopRecording, updateTrayIcon } from "./trayicon";
 
 const log = require("electron-log");
@@ -104,6 +104,23 @@ const checkFlaskServer = async (): Promise<void> => {
 };
 
 app.on("ready", () => {
+    if (process.platform === "darwin") {
+    const accessibilityTrusted =
+      systemPreferences.isTrustedAccessibilityClient(true);
+
+    log.info(
+      `Accessibility permission: ${
+        accessibilityTrusted ? "granted" : "not granted"
+      }`
+    );
+
+    const screenPermission =
+      systemPreferences.getMediaAccessStatus("screen");
+
+    log.info(
+      `Screen recording permission: ${screenPermission}`
+    );
+  }
   startFlaskServer();
   log.info("Flask server started");
   checkFlaskServer();

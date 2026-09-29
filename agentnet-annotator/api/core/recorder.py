@@ -11,7 +11,7 @@ from pynput import keyboard, mouse
 from PyQt6.QtCore import QThread, pyqtSignal
 
 from .metadata import MetadataManager
-from .obs_client import OBSClient, is_obs_recording, OBSAlreadyRecordingError
+from .xrec_capture import XrecCapture
 from .utils import (
     fix_windows_dpi_scaling,
     get_recordings_dir,
@@ -80,13 +80,10 @@ class Recorder(QThread):
             natural_scrolling=natural_scrolling,
         )
         logger.info("Metadata collected.")
-        self.obs_client = OBSClient(
-            recording_path=self.recording_path, metadata=self.metadata_manager.metadata
-        )
 
-        if is_obs_recording(self.obs_client):
-            self.obs_client.stop_recording()
-            raise OBSAlreadyRecordingError("OBS is running before start.")
+        self.capture_client = XrecCapture(
+        recording_path=self.recording_path
+        )
 
         self.mouse_listener = mouse.Listener(
             on_move=self.on_move, on_click=self.on_click, on_scroll=self.on_scroll
@@ -173,7 +170,7 @@ class Recorder(QThread):
         self._is_recording = True
 
         self.metadata_manager.collect()
-        self.obs_client.start_recording()
+        self.capture_client.start_recording()
         self.metadata_manager.set_video_start_timestamp(time.perf_counter())
         self.mouse_listener.start()
         self.keyboard_listener.start()
@@ -273,11 +270,7 @@ class Recorder(QThread):
                 element_writer_thread.join()
             if system() != "Linux":
                 top_window_writer_thread.join()
-            self.obs_client.stop_recording()
-
-            self.metadata_manager.add_obs_record_state_timings(
-                self.obs_client.record_state_events
-            )
+            self.capture_client.stop_recording()
 
             self.events_file.close()
             self.metadata_manager.save_metadata()
@@ -292,7 +285,7 @@ class Recorder(QThread):
     def pause_recording(self):
         if not self._is_paused and self._is_recording:
             self._is_paused = True
-            self.obs_client.pause_recording()
+            self.capture_client.pause_recording()
             self.event_queue.put(
                 {"time_stamp": time.perf_counter(), "action": "pause"}, block=False
             )
@@ -300,7 +293,7 @@ class Recorder(QThread):
     def resume_recording(self):
         if self._is_paused and self._is_recording:
             self._is_paused = False
-            self.obs_client.resume_recording()
+            self.capture_client.resume_recording()
             self.event_queue.put(
                 {"time_stamp": time.perf_counter(), "action": "resume"}, block=False
             )
