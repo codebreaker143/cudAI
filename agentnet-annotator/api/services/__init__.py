@@ -1,1 +1,1 @@
-"""Services module for AgentNet backend."""
+"""Services module for cudAI backend."""

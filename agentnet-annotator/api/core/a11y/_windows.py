@@ -40,6 +40,36 @@ def get_top_window_name() -> str:
     return process_name.split(".", 1)[0]
 
 
+def get_active_app_info() -> dict | None:
+    hwnd = win32gui.GetForegroundWindow()
+    if not hwnd:
+        return None
+
+    pid = ctypes.c_ulong()
+    ctypes.windll.user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+    if pid.value == 0:
+        return None
+
+    process = psutil.Process(pid.value)
+    left, top, right, bottom = win32gui.GetWindowRect(hwnd)
+    try:
+        exe_path = process.exe()
+    except Exception:
+        exe_path = None
+    return {
+        "app_name": process.name().split(".", 1)[0],
+        "bundle_id": exe_path,
+        "pid": pid.value,
+        "window_title": win32gui.GetWindowText(hwnd) or None,
+        "window_bounds": {
+            "x": left,
+            "y": top,
+            "width": right - left,
+            "height": bottom - top,
+        },
+    }
+
+
 # }}} GETTING TOP WINDOW NAME #
 
 # GETTING TREES {{{ #

@@ -1,136 +1,58 @@
 import * as React from "react";
-import { CssVarsProvider } from "@mui/joy/styles";
-import CssBaseline from "@mui/joy/CssBaseline";
+import { Outlet } from "react-router-dom";
 
 import Sidebar from "../components/Sidebar";
-import {
-  Outlet,
-  useLoaderData,
-  useLocation,
-  useNavigate,
-} from "react-router-dom";
-import { MainProvider, useMain } from "../context/MainContext";
 import TermsAndConsent from "../components/prerequisite/Terms";
+import { Spinner } from "../components/ui";
+import { api } from "../lib/api";
 
-interface taskProp {
-  name: string;
-  creation_time: string;
-  task_name: string;
-  recording_status: Record<string, any>;
+interface ConsentState {
+  current_version: string;
+  accepted: boolean;
 }
-
-interface localRecordingProp {
-  name: string;
-  creation_time: string;
-  task_name: string;
-  recording_status: Record<string, any>;
-  visualizable: boolean;
-  status: string;
-}
-
-interface onlineRecordingProp {
-  allocated_timestamp: string | null;
-  upload_timestamp: string | null;
-  verify_feedback: Record<string, any> | null;
-  task_name: string | null;
-  task_description: string | null;
-  recording_id: string | null;
-  downloaded: boolean;
-  visualizable: boolean;
-  status: string | null;
-}
-
-interface tasksGroupProp {
-  uploaded_recordings: localRecordingProp[];
-  not_uploaded_recordings: onlineRecordingProp[];
-}
-
-const loadTasks = async () => {
-  try {
-    const res = await fetch("http://127.0.0.1:5328/api/recordings");
-    if (!res.ok) {
-      throw new Error(`HTTP error! status: ${res.status}`);
-    }
-    const resjson = await res.json();
-    // The API returns data directly, not nested under 'tasks'
-    const tasks: tasksGroupProp = {
-      uploaded_recordings: resjson.uploaded_recordings || [],
-      not_uploaded_recordings: resjson.not_uploaded_recordings || []
-    };
-    console.log("Loaded tasks:", tasks);
-    return { tasks };
-  } catch (error) {
-    console.error("Failed to load tasks:", error);
-    // Return empty task structure as fallback
-    const fallbackTasks: tasksGroupProp = {
-      uploaded_recordings: [],
-      not_uploaded_recordings: []
-    };
-    console.log("Using fallback tasks:", fallbackTasks);
-    return { tasks: fallbackTasks };
-  }
-};
 
 export default function App() {
-  const [tasks, setTasks] = React.useState<tasksGroupProp>({
-    uploaded_recordings: [],
-    not_uploaded_recordings: []
-  });
-  const { openModal, setOpenModal } = useMain();
-  const location = useLocation(); // 使用useLocation钩子
-  const [sidebarOpen, setSidebarOpen] = React.useState(true);
-  const navigate = useNavigate();
+  const [consent, setConsent] = React.useState<ConsentState | null>(null);
 
-  const [showCheck, setShowCheck] = React.useState(false);
-  const [showTerms, setShowTerms] = React.useState(false);
-
+  const loadConsent = React.useCallback(async () => {
+    try {
+      setConsent(await api.get<ConsentState>("/api/consent"));
+    } catch {
+      // Backend still starting.
+      setTimeout(loadConsent, 1000);
+    }
+  }, []);
 
   React.useEffect(() => {
-    console.log(location.pathname);
-    const isTasksPath =
-      location.pathname.startsWith("/tasks") ||
-      location.pathname.startsWith("/reviewtasks");
-    console.log(isTasksPath);
-    setSidebarOpen(!isTasksPath);
-  }, [location]);
+    loadConsent();
+  }, [loadConsent]);
 
+  if (consent === null) {
+    return (
+      <div className="flex h-full items-center justify-center bg-white text-zinc-400 dark:bg-zinc-950">
+        <Spinner className="h-6 w-6" />
+      </div>
+    );
+  }
 
-  // Removed loadTasks useEffect - Sidebar now uses MainContext exclusively
-  // React.useEffect(() => {
-  //   loadTasks().then((response) => {
-  //     console.log("Setting tasks from loadTasks:", response.tasks);
-  //     setTasks(response.tasks);
-  //   }).catch((error) => {
-  //     console.error("Error in loadTasks:", error);
-  //     // Ensure we have a fallback
-  //     setTasks({
-  //       uploaded_recordings: [],
-  //       not_uploaded_recordings: []
-  //     });
-  //   });
-  // }, []);
+  if (!consent.accepted) {
+    return (
+      <div className="h-full overflow-y-auto bg-white dark:bg-zinc-950">
+        <TermsAndConsent
+          version={consent.current_version}
+          accepted={false}
+          onAccepted={loadConsent}
+        />
+      </div>
+    );
+  }
 
-  const handleTermsAgree = async () => {
-    setShowTerms(false);
-  };
-
-  const handleTermsDisagree = async () => {
-    setShowTerms(false);
-    navigate("/");
-  };
-
-// If Check or Terms needs to be shown, don't render the main app content
-  // 主应用内容
   return (
-    <CssVarsProvider disableTransitionOnChange>
-      <CssBaseline />
-      {showTerms ? (<TermsAndConsent onAgree={handleTermsAgree} onDisagree={handleTermsDisagree} />
-      ) : (
-        <div className="flex flex-row min-h-full h-full m-0 p-0 w-full max-w-full">
-          <Sidebar tasks={tasks} init_open={sidebarOpen} />
-          <Outlet />
-        </div>
-      )}
-    </CssVarsProvider>
+    <div className="flex h-full w-full bg-white text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
+      <Sidebar />
+      <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
+        <Outlet />
+      </main>
+    </div>
   );
 }

@@ -6,8 +6,7 @@ from flask_socketio import emit
 from core.logger import logger
 from core.a11y import get_accessibility_tree
 from services.recording_service import RecordingService
-from services.file_service import AccessibilityService, FeedbackService
-from services.upload_service import UploadService
+from services.file_service import AccessibilityService
 from services.error_handler import Validator
 from core.constants import SUCCEED, FAILED
 
@@ -15,26 +14,16 @@ from core.constants import SUCCEED, FAILED
 class WebSocketController:
     """Controller for WebSocket events."""
 
-    def __init__(
-        self,
-        recording_service: RecordingService,
-        upload_service: UploadService,
-    ):
+    def __init__(self, recording_service: RecordingService):
         self.recording_service = recording_service
-        self.upload_service = upload_service
         self.accessibility_service = AccessibilityService()
-        self.feedback_service = FeedbackService()
 
     def start_record(self, data: dict = None) -> None:
         """Handle start recording WebSocket event."""
         logger.info("WebSocketController: start_record")
 
         try:
-            task_hub_data = data.get("task_hub_data", {}) if data else {}
-
-            status, message = self.recording_service.start_recording(
-                task_hub_data
-            )
+            status, message = self.recording_service.start_recording()
 
             if (
                 self.recording_service.recorder_thread
@@ -89,6 +78,15 @@ class WebSocketController:
                     "message": f"Failed to stop recording: {str(e)}",
                 },
             )
+
+    def pause_record(self, data: dict = None) -> None:
+        """Pause: stops screen capture and input logging until resumed."""
+        status, message = self.recording_service.pause_recording()
+        emit("pause_record", {"status": status, "message": message})
+
+    def resume_record(self, data: dict = None) -> None:
+        status, message = self.recording_service.resume_recording()
+        emit("resume_record", {"status": status, "message": message})
 
     def get_axtree(self, data: dict = None) -> None:
         """Handle accessibility tree request."""
@@ -160,83 +158,6 @@ class WebSocketController:
                 "toggle_generate_window_a11y failed"
             )
 
-    def report_feedback(
-        self,
-        data: dict,
-    ) -> None:
-        """Handle feedback reporting."""
-        try:
-            Validator.validate_feedback_data(data)
-
-            feedback = data.get("feedback", "")
-            recording_name = data.get(
-                "recording_name",
-                "",
-            )
-            screenshot = data.get("screenshot")
-
-            status, message = (
-                self.feedback_service.report_feedback(
-                    feedback,
-                    recording_name,
-                    screenshot,
-                )
-            )
-
-            emit(
-                "report_feedback",
-                {
-                    "status": status,
-                    "message": message,
-                },
-            )
-
-        except Exception as e:
-            logger.exception(
-                "WebSocketController: "
-                "report_feedback failed"
-            )
-
-            emit(
-                "report_feedback",
-                {
-                    "status": FAILED,
-                    "message": (
-                        "Failed to process feedback: "
-                        f"{str(e)}"
-                    ),
-                },
-            )
-
-    def upload_recording(
-        self,
-        data: dict,
-    ) -> None:
-        """Handle recording upload."""
-        try:
-            Validator.validate_upload_data(data)
-
-            self.upload_service.enqueue_upload(
-                data
-            )
-
-        except Exception as e:
-            logger.exception(
-                "WebSocketController: "
-                "upload_recording failed"
-            )
-
-            emit(
-                "upload_recording",
-                {
-                    "status": FAILED,
-                    "message": (
-                        "Failed to upload task: "
-                        f"{str(e)}"
-                    ),
-                },
-            )
-
     def setup_events(
         self,
         socketio,
@@ -254,6 +175,16 @@ class WebSocketController:
         )
 
         socketio.on_event(
+            "pause_record",
+            self.pause_record,
+        )
+
+        socketio.on_event(
+            "resume_record",
+            self.resume_record,
+        )
+
+        socketio.on_event(
             "get_axtree",
             self.get_axtree,
         )
@@ -261,14 +192,4 @@ class WebSocketController:
         socketio.on_event(
             "toggle_generate_window_a11y",
             self.toggle_generate_window_a11y,
-        )
-
-        socketio.on_event(
-            "report_feedback",
-            self.report_feedback,
-        )
-
-        socketio.on_event(
-            "upload_recording",
-            self.upload_recording,
         )

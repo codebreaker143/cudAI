@@ -3,6 +3,8 @@ import { ICON_BASE64 } from "./iconBase64";
 import { START } from "./Start";
 import { STOP } from "./Stop";
 
+export const APP_TITLE = "cudAI";
+
 let tray: Tray | null = null;
 let old_color: string = "green";
 let is_recording: boolean = false;
@@ -17,7 +19,7 @@ export function createTray(app: Electron.App): Tray {
     { label: "Quit", click: () => app.quit() },
   ]);
 
-  tray.setTitle("AgentNet");
+  tray.setTitle(APP_TITLE);
   tray.setContextMenu(contextMenu);
 
   return tray;
@@ -61,7 +63,17 @@ export function StopRecording(): void {
       .createFromDataURL(ICON_BASE64)
       .resize({ width: 16, height: 16 });
     tray.setImage(icon);
-    tray?.setTitle("AgentNet");
+    tray?.setTitle(APP_TITLE);
     old_color = "green";
+  }
+}
+
+export function PauseRecording(): void {
+  if (tray) {
+    const icon = nativeImage
+      .createFromDataURL(ICON_BASE64)
+      .resize({ width: 16, height: 16 });
+    tray.setImage(icon);
+    tray.setTitle("Paused");
   }
 }

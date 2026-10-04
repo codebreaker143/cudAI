@@ -181,6 +181,7 @@ node_modules/
 package-lock.json
 
 tests
+!agentnet-annotator/api/tests/
 
 # ffmpeg
 ffmpeg

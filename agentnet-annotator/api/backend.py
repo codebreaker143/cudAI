@@ -2,16 +2,15 @@
 
 import os
 import signal
-import sys
 from flask import Flask
 from flask_cors import CORS
 from flask_socketio import SocketIO
 
 from core.logger import logger
+from core.utils import migrate_legacy_recordings
 from services.config_service import ConfigService
 from services.recording_service import RecordingService
 from services.file_service import FileService
-from services.upload_service import UploadService
 from controllers.recording_controller import RecordingController
 from controllers.websocket_controller import WebSocketController
 from controllers.browser_controller import BrowserController
@@ -21,8 +20,8 @@ from controllers.system_controller import SystemController
 from engineio.async_drivers import gevent
 
 
-class AgentNetBackend:
-    """Refactored AgentNet Backend with modular architecture."""
+class CudaiBackend:
+    """cudAI recorder backend."""
 
     def __init__(self):
         logger.info("Backend: Initializing modular backend")
@@ -54,7 +53,6 @@ class AgentNetBackend:
     def _initialize_services(self):
         """Initialize all service instances."""
         self.recording_service = RecordingService(self.socketio)
-        self.upload_service = UploadService(self.socketio)
         self.file_service = FileService()
 
     def _initialize_controllers(self):
@@ -62,33 +60,32 @@ class AgentNetBackend:
         self.recording_controller = RecordingController(
             self.recording_service, self.file_service, self.socketio
         )
-        self.websocket_controller = WebSocketController(
-            self.recording_service, self.upload_service
-        )
+        self.websocket_controller = WebSocketController(self.recording_service)
         self.browser_controller = BrowserController(self.file_service)
-        self.system_controller = SystemController()
+        self.system_controller = SystemController(self.recording_service)
 
     def _setup_routes(self):
         routes = [
             # System Endpoints
             ("/api/check_permissions", self.system_controller.check_permissions),
+            ("/api/consent", self.system_controller.get_consent),
+            ("/api/consent", self.system_controller.set_consent, {"methods": ["POST"]}),
+            ("/api/recording/status", self.system_controller.recording_status),
+            ("/api/system/info", self.system_controller.system_info),
             ("/api/recording/save_task", self.system_controller.save_task_endpoint, {"methods": ["POST"]}),
             # Recording Endpoints
             ("/api/recordings", self.recording_controller.get_user_recordings_list),
             ("/api/recording/<recording_name>", self.recording_controller.get_single_user_recording),
-            ("/api/recording/<recording_name>/<int:verifying>", self.recording_controller.get_single_review_recording),
+            ("/api/recording/<recording_name>/review", self.recording_controller.get_review),
+            ("/api/recording/<recording_name>/video.mp4", self.recording_controller.stream_video),
+            ("/api/recording/<recording_name>/task", self.recording_controller.update_task, {"methods": ["POST"]}),
             # Video Endpoints
             ("/api/video/<recording_name>/<event_index>", self.recording_controller.get_video),
-            ("/api/video/<recording_name>/<event_index>/<int:verifying>", self.recording_controller.get_video),
             ("/api/fullvideo/<recording_name>", self.recording_controller.get_full_video_endpoint),
             # Recording Operations
             ("/api/recording/<recording_name>/confirm", self.recording_controller.confirm_recording, {"methods": ["POST"]}),
-            ("/api/recording/<recording_name>/hub_data", self.recording_controller.get_hub_data),
             ("/api/recording/<recording_name>/cut", self.recording_controller.annotate_task_endpoint, {"methods": ["POST"]}),
             # Local Operations
-            ("/api/recording/<recording_name>/delete_local_recording", self.recording_controller.delete_local_recording_endpoint),
-            ("/api/recording/<recording_name>/delete_local_verify_recording", self.recording_controller.delete_local_verify_recording_endpoint),
-            ("/get_local_recording_info", self.recording_controller.get_local_recording_info, {"methods": ["POST"]}),
             # Browser Integration
             ("/api/browser/append_element", self.browser_controller.append_browser_element, {"methods": ["POST"]}),
             ("/api/browser/append_html", self.browser_controller.append_browser_html, {"methods": ["POST"]}),
@@ -150,7 +147,7 @@ class AgentNetBackend:
             logger.exception(f"Backend: Error during shutdown: {e}")
 
 
-def create_signal_handler(backend: AgentNetBackend):
+def create_signal_handler(backend: CudaiBackend):
     """Create signal handler for graceful shutdown."""
 
     def signal_handler(sig, frame):
@@ -176,7 +173,8 @@ def create_signal_handler(backend: AgentNetBackend):
 def main():
     """Main entry point for the application."""
     try:
-        backend = AgentNetBackend()
+        migrate_legacy_recordings()
+        backend = CudaiBackend()
 
         # Setup signal handler
         signal.signal(signal.SIGINT, create_signal_handler(backend))

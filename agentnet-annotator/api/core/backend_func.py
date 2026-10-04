@@ -2,201 +2,20 @@ import os
 import json
 import uuid
 import shutil
-import requests
 from flask import jsonify, request
 
-from .constants import *
 from .logger import logger
+from .export import write_export
 from .utils import (
     RECORDING_DIR,
-    REVIEW_RECORDING_DIR,
-    LOGIN_CODE_DIR,
     cut_video,
     find_mp4,
     get_latest_folder,
-    check_recording_visualizable,
     read_encrypted_jsonl,
     write_encrypted_json,
     write_encrypted_jsonl,
     write_jsonl
 )
-
-def set_login_code(group: str = "test", path: str = LOGIN_CODE_DIR):
-    group_uuid = f"{group}-{uuid.uuid4()}"
-    group_uuid_bytes = group_uuid.encode('utf-8')
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    
-    with open(path, 'wb') as file:
-        file.write(group_uuid_bytes)
-
-def read_login_code(path: str = LOGIN_CODE_DIR) -> str:
-    if not os.path.exists(path):
-        return None
-    
-    with open(path, 'rb') as file:
-        login_code = file.read()
-    
-    login_code = login_code.decode('utf-8')
-    return login_code
-
-        
-def check_user_data():
-    try:
-        if os.path.exists(LOGIN_CODE_DIR):
-            logger.info("check_user_data: login_code exists at local")
-            login_code = read_login_code()
-            user_id = login_code
-            response = requests.get(
-                f"{SERVER_URL}/get_user_data",
-                params={"user_id": user_id},
-            )
-            logger.info(response.json())
-        
-        user_id = request.args.get("user_id")
-        logger.info(f"Backend: check_user_data: user_id: {str(user_id)}")
-
-        if (not user_id) or (user_id == "undefined"):
-            return jsonify({
-                        "status": FAILED,
-                        "message": "Please Login to Use AgentNet",
-                        "data": None,
-                    }), 400
-
-        response = requests.get(
-            f"{SERVER_URL}/get_user_data",
-            params={"user_id": user_id},
-        )
-        logger.info(str(response))
-
-        if response.status_code == 200:
-            data = response.json()
-            return jsonify(data), 200
-        else:
-            error_data = response.json()
-            logger.warning(
-                f"Server returned error: {response.status_code}, {error_data.get('message', 'Unknown error')}"
-            )
-            return jsonify(error_data), response.status_code
-
-    except requests.RequestException as e:
-        logger.exception(f"Network error in get_user_data: {str(e)}")
-        return jsonify({
-                    "status": FAILED,
-                    "message": "Failed to connect to the server",
-                    "data": None,
-                }), 503
-
-    except Exception as e:
-        logger.exception(f"Unexpected error in get_user_data: {str(e)}")
-        return jsonify({
-                    "status": FAILED,
-                    "message": "An unexpected error occurred",
-                    "data": None,
-                }), 500
-
-
-def get_annotation_statistics_overview():
-    try:
-        # Retrieve the 'upload_time' parameter from the request, defaulting to 'all' if not provided
-        upload_time = request.args.get("upload_timestamp", "all")
-        user_id = request.args.get("user_id")
-        # Validate 'upload_time' to ensure it's one of the allowed values
-        if upload_time not in ["all", "1day", "1week", "1month", "3month"]:
-            return (
-                jsonify(
-                    {
-                        "status": FAILED,
-                        "message": "Invalid upload_time parameter. Must be 'all', '1day', '1week', '1month' or '3month'.",
-                    }
-                ),
-                400,
-            )
-
-        params = {"upload_timestamp": upload_time, "user_id": user_id}
-
-        # Make a GET request to the external server's /get_overview endpoint with the validated parameters
-        response = requests.get(f"{SERVER_URL}/get_overview", params=params)
-        # Raise an exception if the request failed
-        response.raise_for_status()
-
-        # Return the JSON response from the external server
-        return jsonify(response.json()), response.status_code
-
-    except requests.RequestException as e:
-        # Handle any exceptions that occurred during the request
-        logger.exception(f"Error fetching overview data from server: {e}")
-        return (
-            jsonify(
-                {
-                    "status": FAILED,
-                    "message": "Error fetching overview data from server.",
-                }
-            ),
-            500,
-        )
-    except Exception as e:
-        # Catch any other exceptions
-        logger.exception(f"Unexpected error: {e}")
-        return (
-            jsonify({"status": FAILED, "message": "An unexpected error occurred."}),
-            500,
-        )
-
-def get_downloaded_verifying_recordings_list():
-    """
-    Modified: check_recording_visualizable
-    """
-    downloaded_verifying_recordings = []
-
-    recording_ids = [
-        dir
-        for dir in os.listdir(REVIEW_RECORDING_DIR)
-        if os.path.isdir(os.path.join(REVIEW_RECORDING_DIR, dir))
-    ]
-
-    for recording_id in recording_ids:
-        if check_recording_visualizable(recording_name=recording_id, reviewing=True):
-            downloaded_verifying_recordings.append(recording_id)
-
-    return (
-        jsonify(
-            {
-                "status": SUCCEED,
-                "message": "Get_downloaded_verifying_recordings_list succeed",
-                "data": downloaded_verifying_recordings,
-            }
-        ),
-        200,
-    )
-
-
-def get_downloaded_user_recordings_list():
-    """
-    TODO: seperate not downloaded or broken
-    """
-    downloaded_verifying_recordings = []
-
-    recording_names = [
-        dir
-        for dir in os.listdir(RECORDING_DIR)
-        if os.path.isdir(os.path.join(RECORDING_DIR, dir))
-    ]
-
-    for recording_name in recording_names:
-        if check_recording_visualizable(recording_name=recording_name, reviewing=False):
-            downloaded_verifying_recordings.append(recording_name)
-
-    return (
-        jsonify(
-            {
-                "status": SUCCEED,
-                "message": "get_downloaded_user_recordings_list succeed",
-                "data": downloaded_verifying_recordings,
-            }
-        ),
-        200,
-    )
-
 
 def annotate_task(recording_name, socketservice):
     """
@@ -239,6 +58,7 @@ def annotate_task(recording_name, socketservice):
             {"task_name": task_name, "description": description},
         )
 
+        write_export(folder_path)
         return jsonify({"success": "Save task name and description successfully"}), 200
 
     raw_events_path = os.path.join(folder_path, "events.jsonl")
@@ -344,8 +164,20 @@ def annotate_task(recording_name, socketservice):
     with open(metadata_path, "r", encoding="utf-8") as f:
         metadata = json.load(f)
     old_start_timestamp = metadata["video_start_timestamp"]
-    # TODO: video_end_timestamp, start_timestamp
-    metadata["video_start_timestamp"] = start_timestamp  # TODO: need to make sure what fields are exactly needed
+    # Clips before the first frame are clamped by cut_video.
+    new_video_start = max(start_timestamp, old_start_timestamp)
+    metadata["parent_recording_id"] = metadata.get("recording_id", recording_name)
+    metadata["recording_id"] = recording_id
+    metadata["video_start_timestamp"] = new_video_start
+    if isinstance(metadata.get("video"), dict):
+        metadata["video"]["video_start_timestamp"] = new_video_start
+        metadata["video"]["duration"] = end_timestamp - new_video_start
+        metadata["video"]["segments"] = None
+        metadata["video"]["paused_gaps"] = [
+            gap for gap in metadata["video"].get("paused_gaps") or []
+            if gap["end_timestamp"] > new_video_start
+            and gap["start_timestamp"] < end_timestamp
+        ]
     with open(
         os.path.join(new_folder_path, "metadata.json"), "w", encoding="utf-8"
     ) as f:
@@ -389,48 +221,8 @@ def annotate_task(recording_name, socketservice):
             "message": "stop_recording succeed."
         }
     )
+    write_export(new_folder_path)
     return jsonify({"success": "Cut task successfully"}), 200
-
-
-def delete_local_verify_recording(recording_name):
-    delete_folder_path = os.path.join(REVIEW_RECORDING_DIR, recording_name)
-    logger.info(f"Delete {delete_folder_path}")
-    if not os.path.exists(delete_folder_path) or not os.path.isdir(delete_folder_path):
-        return (
-            jsonify(
-                {
-                    "status": FAILED,
-                    "error": "Recording not found",
-                    "message": f"Recording {recording_name} not found",
-                }
-            ),
-            404,
-        )
-    else:
-        try:
-            shutil.rmtree(delete_folder_path)
-            return (
-                jsonify(
-                    {
-                        "status": SUCCEED,
-                        "success": f"Successfully delete the verify recording {recording_name}",
-                        "message": f"Successfully delete the verify recording {recording_name}",
-                    }
-                ),
-                200,
-            )
-
-        except Exception as e:
-            return (
-                jsonify(
-                    {
-                        "status": FAILED,
-                        "error": str(e),
-                        "message": f"delete_verify_recording failed: \n{str(e)}",
-                    }
-                ),
-                500,
-            )
 
 
 # legacy
@@ -442,180 +234,6 @@ def read_recording_status(recording_path):
     else:
         recording_status = None
     return recording_status
-
-
-def change_recording_status(recording_id: str, new_status: str) -> dict:
-    """
-    Client-side function to call the change_recording_status API on the server.
-
-    Args:
-        recording_id (str): The ID of the recording whose status needs to be updated.
-        new_status (str): The new status to set for the recording.
-
-    Returns:
-        dict: The server's response in JSON format. Contains the status and message.
-    """
-    try:
-        # Define the URL of the API endpoint
-        url = f"{SERVER_URL}/change_recording_status"
-
-        # Construct the payload
-        payload = {
-            "recording_id": recording_id,
-            "new_status": new_status
-        }
-
-        # Send the POST request to the server
-        response = requests.post(url, json=payload, timeout=10)
-        # Raise an exception for bad HTTP response codes (4xx or 5xx)
-        response.raise_for_status()
-
-        if response.status_code == 200:
-            logger.info(f"Successfully updated status for recording {recording_id} to {new_status}.")
-            return response.json()
-        else:
-            logger.warning(f"Failed to update status for recording {recording_id}. Server responded with status code {response.status_code}.")
-            return {
-                "status": FAILED,
-                "message": f"Server returned status code {response.status_code}."
-            }
-
-    except requests.RequestException as e:
-        logger.error(f"Error while trying to change recording status: {e}")
-        return {
-            "status": FAILED,
-            "message": "Failed to communicate with the server.",
-            "error": str(e),
-        }
-    except Exception as e:
-        logger.error(f"Unexpected error occurred: {e}")
-        return {
-            "status": FAILED,
-            "message": "An unexpected error occurred.",
-            "error": str(e),
-        }
-
-def unallocate_user_verifying_recordings(verifier_id: str, local_recording_ids: list) -> dict:
-    """
-    Client-side function to call the unallocate_user_verifying_recordings API on the server.
-
-    Args:
-        verifier_id (str): The ID of the verifier whose recordings need to be unallocated.
-        local_recording_ids (list): A list of recording IDs that should not be unallocated.
-
-    Returns:
-        dict: The server's response in JSON format, indicating success or failure.
-    """
-    try:
-        logger.info("unallocate_user_verifying_recordings")
-        url = f"{SERVER_URL}/unallocate_user_verifying_recordings"
-        payload = {
-            "user_id": verifier_id,
-            "local_recording_ids": local_recording_ids
-        }
-
-        response = requests.post(url, json=payload, timeout=60)
-
-        if response.status_code == 200:
-            logger.info(f"Successfully unallocated recordings for verifier {verifier_id}.")
-            return response.json()
-        else:
-            logger.warning(f"Failed to unallocate recordings. Server responded with status code {response.status_code}.")
-            return {
-                "status": FAILED,
-                "message": f"Server returned status code {response.status_code}."
-            }
-
-    except requests.RequestException as e:
-        logger.error(f"Error while trying to unallocate recordings for verifier {verifier_id}: {e}")
-        return {
-            "status": FAILED,
-            "message": "Failed to communicate with the server.",
-            "error": str(e),
-        }
-    except Exception as e:
-        logger.error(f"Unexpected error occurred: {e}")
-        return {
-            "status": FAILED,
-            "message": "An unexpected error occurred.",
-            "error": str(e),
-        }
-        
-def unallocate_recording(recording_id: str, verifier_id: str) -> dict:
-    """
-    Client-side function to call the unallocate_recording API on the server.
-
-    Args:
-        recording_id (str): The ID of the recording to be unallocated.
-        verifier_id (str): The ID of the verifier whose allocation needs to be reset.
-
-    Returns:
-        dict: The server's response in JSON format, indicating success or failure.
-    """
-    try:
-        # Define the API endpoint URL
-        url = f"{SERVER_URL}/unallocate_recording"
-        
-        # Construct the payload (data) to be sent in the request
-        payload = {
-            "recording_id": recording_id,
-            "user_id": verifier_id
-        }
-
-        # Send a POST request to the server
-        response = requests.post(url, json=payload, timeout=60)
-
-        # Raise an exception for bad HTTP response codes (4xx or 5xx)
-        response.raise_for_status()
-
-        if response.status_code == 200:
-            logger.info(f"Successfully unallocated recording {recording_id} for verifier {verifier_id}.")
-            return response.json()
-        else:
-            logger.warning(f"Failed to unallocate recording {recording_id}. Server responded with status code {response.status_code}.")
-            return {
-                "status": FAILED,
-                "message": f"Server returned status code {response.status_code}."
-            }
-
-    except requests.RequestException as e:
-        logger.error(f"Error while trying to unallocate recording {recording_id}: {e}")
-        return {
-            "status": FAILED,
-            "message": "Failed to communicate with the server.",
-            "error": str(e),
-        }
-    except Exception as e:
-        logger.error(f"Unexpected error occurred: {e}")
-        return {
-            "status": FAILED,
-            "message": "An unexpected error occurred.",
-            "error": str(e),
-        }
-
-def delete_local_recording(recording_name):
-    delete_folder_path = os.path.join(RECORDING_DIR, recording_name)
-    logger.info(f"Delete {delete_folder_path}")
-    if not os.path.exists(delete_folder_path) or not os.path.isdir(delete_folder_path):
-        return jsonify({
-                    "status": FAILED,
-                    "error": "Recording not found",
-                    "message": f"Recording {recording_name} not found",
-                }), 404
-    else:
-        try:
-            shutil.rmtree(delete_folder_path)
-            return jsonify({
-                        "status": SUCCEED,
-                        "success": f"Successfully delete the recording {recording_name}",
-                        "message": f"Successfully delete the recording {recording_name}",
-                    }), 200
-        except Exception as e:
-            return jsonify({
-                        "status": FAILED,
-                        "error": str(e),
-                        "message": f"delete_recording failed: \n{str(e)}",
-                    }), 500
 
 
 def get_full_video(recording_name):  # TODO: check if delete files affect
@@ -655,6 +273,7 @@ def save_task():
             os.path.join(task_folder_path, "task_name.json"),
             {"task_name": task, "description": description},
         )
+        write_export(task_folder_path)
         logger.info("Task name saved.")
         return jsonify({"message": "Task saved successfully"}), 200
 

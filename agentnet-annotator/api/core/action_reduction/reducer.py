@@ -57,8 +57,8 @@ if __name__ == "__main__":
 else:
     from .action import *
     from .reduction_helper import *
+    from .preprocess import preprocess_events
     from ..logger import logger
-    from ..ai_assistant import predict_targets
     from ..a11y import parse_element
     from ..utils import (
         get_recordings_dir,
@@ -216,14 +216,14 @@ class Reducer:
 
             cur_event["action"] = "type"
             cur_event["complete"] = True
-            cur_event["key_names"] = [cur_event["name"]]
+            cur_event["key_names"] = [typed_key_name(cur_event)]
             self.event_buffer.append(cur_event)
 
     def _add_key_release_event_to_buffer(
         self, cur_event, last_event, is_last_event_same
     ):
         if last_event is None:
-            logger.warning(
+            logger.debug(
                 "Warning: no event before a release event {}".format(cur_event)
             )
             return
@@ -243,7 +243,7 @@ class Reducer:
                 ):
                     self.event_buffer[i]["end_time"] = cur_event["time_stamp"]
                     return
-            logger.warning(
+            logger.debug(
                 "Warning: _add_key_release_event_to_buffer: no key press event before release {}".format(
                     cur_event
                 )
@@ -266,7 +266,7 @@ class Reducer:
                     self.event_buffer[i]["matched"] = len(self.event_buffer)
                     self.event_buffer.append(cur_event)
                     return
-            logger.warning("Start press key not found: {}".format(cur_event))
+            logger.debug("Start press key not found: {}".format(cur_event))
 
     def _add_click_event_to_buffer(self, cur_event):
         if self.pre_move is not None:  # TODO: sometimes, new event won't be added, neither the pre_move
@@ -280,7 +280,7 @@ class Reducer:
             return
 
         if len(self.event_buffer) == 0:
-            logger.warning(
+            logger.debug(
                 "Click action ignored: no action before mouse release {}.\n".format(
                     cur_event
                 )
@@ -302,12 +302,12 @@ class Reducer:
                 self.event_buffer.append(cur_event)
                 return
 
-        logger.warning("Start press mouse not found: {}".format(cur_event))
+        logger.debug("Start press mouse not found: {}".format(cur_event))
 
     def reduce_all(self):
         idx = 0
         while idx < len(self.event_buffer):
-            logger.warning(
+            logger.debug(
                 "{}  {} {}".format(
                     idx,
                     self.event_buffer[idx]["key"],
@@ -361,7 +361,7 @@ class Reducer:
                             exception_action = Press(event)
                             exception_action.set_exception_end_event()
                             self.reduced_actions.append(exception_action)
-                            logger.warning("No matched release event: {}".format(event))
+                            logger.debug("No matched release event: {}".format(event))
                             idx += 1
                             continue
 
@@ -373,7 +373,7 @@ class Reducer:
                             ):
 
                                 if self.event_buffer[i]["matched"] > match_idx:
-                                    logger.error("Here ???")
+                                    logger.debug("Here ???")
                                     exception_event = self.event_buffer.pop(i)
                                     exception_event["start_time"] = event["start_time"]
                                     exception_event["time_stampe"] = event["start_time"]
@@ -390,7 +390,7 @@ class Reducer:
                     # key release action
                     else:
                         start_key_idx = self._find_start_key_idx(event["key"])
-                        logger.error("{} {}".format(start_key_idx, event["key"]))
+                        logger.debug("{} {}".format(start_key_idx, event["key"]))
                         if start_key_idx is not None:
                             self.reduced_actions[start_key_idx].set_complete_event(
                                 event
@@ -413,7 +413,7 @@ class Reducer:
 
                         else:
                             # No matched start key
-                            logger.warning(f"Reduce warning: no start key for {event}")
+                            logger.debug(f"Reduce warning: no start key for {event}")
 
             elif event["action"] == "click":
                 if event["key"][-1]:
@@ -425,7 +425,7 @@ class Reducer:
                         exception_action = Click(event)
                         exception_action.set_exception_end_event()
                         self.reduced_actions.append(exception_action)
-                        logger.warning("No matched release event: {}".format(event))
+                        logger.debug("No matched release event: {}".format(event))
                         idx += 1
                         continue
 
@@ -435,7 +435,7 @@ class Reducer:
                         and self.event_buffer[idx + 1]["action"] == "press"
                         and self.event_buffer[idx + 1]["key"][-1]
                     ):
-                        logger.warning(
+                        logger.debug(
                             "idx {} match_idx {} rearange {}".format(
                                 idx, match_idx, self.event_buffer[idx + 2]
                             )
@@ -450,7 +450,7 @@ class Reducer:
                             and self.event_buffer[i]["matched"] is not None
                         ):
                             if self.event_buffer[i]["matched"] > match_idx:
-                                logger.error("Here !!! {} {}".format(self.event_buffer[i]["key"], self.event_buffer[i]["time_stamp"]) )
+                                logger.debug("Here !!! {} {}".format(self.event_buffer[i]["key"], self.event_buffer[i]["time_stamp"]) )
                                 exception_event = self.event_buffer.pop(i)
                                 exception_event["start_time"] = event["start_time"]
                                 exception_event["time_stampe"] = event["start_time"]
@@ -472,7 +472,7 @@ class Reducer:
 
                     if start_key_idx is None:
                         # No matched start key
-                        logger.warning(
+                        logger.debug(
                             f"Reducer reduce_all warning: no start key for {event}"
                         )
                         idx += 1
@@ -517,7 +517,7 @@ class Reducer:
                                     last_click_idx + 1 : len(self.reduced_actions)
                                 ]
             else:
-                logger.warning(f"unsupported event: {event}")
+                logger.debug(f"unsupported event: {event}")
 
             idx += 1
 
@@ -528,7 +528,7 @@ class Reducer:
                 continue
             else:
                 if self.reduced_actions[i].complete:
-                    logger.warning(
+                    logger.debug(
                         f"Reducer _find_start_key_idx error: {key} key pair match but completed."
                     )
                     continue
@@ -557,23 +557,23 @@ class Reducer:
         #    logger.warning("{} {}".format(i, self.reduced_actions[i].action))
 
         self.complete_idx = 0
-        logger.error("transform {}".format(len(self.reduced_actions)))
+        logger.debug("transform {}".format(len(self.reduced_actions)))
         while self.complete_idx < len(self.reduced_actions):
 
-            logger.warning(
+            logger.debug(
                 "{} {} {}".format(
                     self.complete_idx,
                     len(self.reduced_actions),
                     self.reduced_actions[self.complete_idx].action,
                 )
             )
-            logger.warning("last_action: {}".format(self.reduced_actions[-1].action))
+            logger.debug("last_action: {}".format(self.reduced_actions[-1].action))
             temp_action = self.reduced_actions[self.complete_idx]
 
             if not temp_action.complete:
                 # TODO: may have corner case
                 if self.complete_idx < len(self.reduced_actions):
-                    logger.warning("Reducer: transform: action {} is not complete.")
+                    logger.debug("Reducer: transform: action {} is not complete.")
                     self.reduced_actions.pop(self.complete_idx)
                     continue
                 else:
@@ -585,7 +585,7 @@ class Reducer:
                 # if not last action (last action could be extended by new actions)
                 if self.complete_idx + 1 < len(self.reduced_actions):
                     if self.reduced_actions[self.complete_idx + 1].action == "type":
-                        logger.warning(
+                        logger.debug(
                             "here {} {} {}".format(
                                 self.complete_idx,
                                 self.reduced_actions[self.complete_idx].key,
@@ -601,7 +601,7 @@ class Reducer:
                         and self.reduced_actions[self.complete_idx + 1].is_typing()
                         and self.complete_idx < len(self.reduced_actions) - 1
                     ):
-                        logger.warning(
+                        logger.debug(
                             "there {} {} {}".format(
                                 self.complete_idx,
                                 self.reduced_actions[self.complete_idx].key,
@@ -625,7 +625,7 @@ class Reducer:
             self.reduced_actions[-1].transform()
 
     def finish(self, save=False):
-        logger.error(f"finish {len(self.reduced_actions)}")
+        logger.debug(f"finish {len(self.reduced_actions)}")
         for action in self.reduced_actions:
             if action.action == "drag":
                 action.drag_trace = action.children[0].trace
@@ -673,7 +673,7 @@ class Reducer:
                 )
             del self.reduced_actions[self.complete_idx + 1 : len(self.reduced_actions)]
 
-        logger.error(f"finish {len(self.reduced_actions)}")
+        logger.debug(f"finish {len(self.reduced_actions)}")
 
     def process_actions_multithreaded(self, recording_path, video_attrs, window_attrs):
         def process_action(action, recording_path, video_attrs, window_attrs):
@@ -803,39 +803,6 @@ class Reducer:
                 return True
             return False
 
-        def clean_text(text_list):
-            filtered_text = []
-            for line in text_list:
-                if re.search(r"[a-zA-Z]", line) or re.search(r"[0-9]", line):
-                    line = re.sub(r"[^\w\s]", "", line)
-                    line = " ".join(line.split())
-                    if line:
-                        filtered_text.append(line)
-            filtered_text = list(set(filtered_text))
-            filtered_text.sort()
-            return filtered_text
-
-        def extract_text_from_json(json_data):
-            def extract_from_dict(d):
-                text_list = []
-                if isinstance(d, dict):
-                    for key, value in d.items():
-                        if key in ["AXTitle", "AXDescription", "AXValue", "Name"]:
-                            if isinstance(value, (str, int)):
-                                text_list.append(str(value))
-                        if isinstance(value, dict):
-                            text_list.extend(extract_from_dict(value))
-                        elif isinstance(value, list):
-                            for item in value:
-                                text_list.extend(extract_from_dict(item))
-                elif isinstance(d, list):
-                    for item in d:
-                        text_list.extend(extract_from_dict(item))
-                return text_list
-
-            json_texts = extract_from_dict(json_data)
-            return clean_text(json_texts)
-
         html_element_data_path = os.path.join(self.recording_path, "html_element.jsonl")
         has_html = False
         html_element_data = []
@@ -911,62 +878,6 @@ class Reducer:
                 saved_htmls.add(_find_pred(action.start_time, html_data))
                 saved_htmls.add(_find_succ(action.start_time, html_data))
 
-        need_gpt_list = []
-        for index, action in enumerate(self.reduced_actions):
-            if action.action in ("click"):
-                if action.axtree:
-                    axtree_texts = extract_text_from_json(action.axtree)
-                    logger.info(
-                        f"Action {action.action} has {len(axtree_texts)} text nodes, target is useful? {is_useful(action.target)}"
-                    )
-                    if len(axtree_texts) < 10 and (not is_useful(action.target)):
-                        # 判断出来拿的tree是空壳，这个tree也不需要了
-                        logger.info(f"Target {action.target} is not useful")
-                        need_gpt_list.append(
-                            {
-                                "id": index,
-                                "timestamp": action.start_time,
-                                "action": action.action,
-                                "description": action.description,
-                                "coordinate": action.coordinate,
-                            }
-                        )
-                else:
-                    logger.info(
-                        f"Action {action.action} target is useful? {is_useful(action.target)}"
-                    )
-                    if not is_useful(action.target):
-                        logger.info(f"Target {action.target} is not useful")
-                        need_gpt_list.append(
-                            {
-                                "id": index,
-                                "timestamp": action.start_time,
-                                "action": action.action,
-                                "description": action.description,
-                                "coordinate": action.coordinate,
-                            }
-                        )
-
-        if len(need_gpt_list) > 0:
-            try:
-                gpt_result = predict_targets(self.recording_path, need_gpt_list)
-                need_gpt_idx = [event["id"] for event in need_gpt_list]
-
-                for result, index in zip(gpt_result, need_gpt_idx):
-                    self.reduced_actions[index].gpt_target = result
-                    if hasattr(self.reduced_actions[index], "target") and isinstance(
-                        self.reduced_actions[index].target, dict
-                    ):
-                        self.reduced_actions[index].target["mark"] = False
-                    if hasattr(
-                        self.reduced_actions[index], "past_frame_target"
-                    ) and isinstance(
-                        self.reduced_actions[index].past_frame_target, dict
-                    ):
-                        self.reduced_actions[index].past_frame_target["mark"] = False
-            except Exception as e:
-                logger.exception(f"Reducer: match_element: {str(e)}")
-
         # Save html info
         saved_html_data = [html_data[idx] for idx in saved_htmls]
         write_encrypted_jsonl(
@@ -1029,6 +940,13 @@ class Reducer:
             events = read_encrypted_jsonl(
                 path=os.path.join(recording_path, "events.jsonl")
             )
+            top_window_path = os.path.join(recording_path, "top_window.jsonl")
+            top_windows = (
+                read_encrypted_jsonl(top_window_path)
+                if os.path.exists(top_window_path)
+                else []
+            )
+            events = preprocess_events(events, top_windows)
 
             video_path = os.path.join(recording_path, "video_clips")
             if os.path.exists(video_path):
@@ -1084,9 +1002,13 @@ class Reducer:
             logger.info(
                 f"Reducer: action num: {len(self.reduced_actions)}, reduce time: {reduction_time}"
             )
+            from ..export import write_export  # circular at module level
+
+            write_export(recording_path)
 
         except Exception as e:
             logger.exception(f"reduce_pipeline failed: {str(e)}")
+            raise
 
 
 def visualize_recording(

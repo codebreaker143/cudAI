@@ -21,7 +21,7 @@ const _osxNotarize = process.platform === 'darwin' ? {
 const config: ForgeConfig = {
   packagerConfig: {
     asar: true,
-    name: 'agentnet-annotator',
+    name: 'cudAI',
     icon: './src/assets/icon',
     extraResource: [
       'api/dist/backend/'
@@ -30,8 +30,8 @@ const config: ForgeConfig = {
     osxNotarize: _osxNotarize,
     protocols: [
       {
-        name: 'agentnet',
-        schemes: ['agentnet'],
+        name: 'cudai',
+        schemes: ['cudai'],
       },
     ]
   },

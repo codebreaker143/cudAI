@@ -24,6 +24,7 @@ if system() == "Darwin":
     pyinstaller_cmd = [
         "pyinstaller", "--onedir",
         f"--add-data={ffmpeg}{';' if system() == 'Windows' else ':'}{ffmpeg}",
+        "--add-data=licenses:licenses",
         "--hidden-import", "gevent-websocket",
         "--runtime-hook", "runtime-hook.py",
         "--distpath", "./dist",

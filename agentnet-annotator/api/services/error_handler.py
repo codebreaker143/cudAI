@@ -115,9 +115,12 @@ class Validator:
         if not isinstance(recording_name, str):
             raise ValidationError("Recording name must be a string")
 
-        # Add more specific validation rules as needed
         if len(recording_name.strip()) == 0:
             raise ValidationError("Recording name cannot be empty")
+
+        # Recording names are folder names; never allow path traversal.
+        if "/" in recording_name or "\\" in recording_name or recording_name.startswith("."):
+            raise ValidationError("Invalid recording name")
 
     @staticmethod
     def validate_event_index(event_index: str) -> int:
@@ -144,28 +147,6 @@ class Validator:
             return bool(flag)
 
         raise ValidationError(f"{field_name} must be a boolean value")
-
-    @staticmethod
-    def validate_feedback_data(data: Dict) -> None:
-        """Validate feedback data structure."""
-        if not isinstance(data, dict):
-            raise ValidationError("Feedback data must be a dictionary")
-
-        # Feedback field is optional but should be a string if provided
-        feedback = data.get("feedback")
-        if feedback is not None and not isinstance(feedback, str):
-            raise ValidationError("Feedback must be a string")
-
-        # Recording name is optional but should be a string if provided
-        recording_name = data.get("recording_name")
-        if recording_name is not None:
-            Validator.validate_recording_name(recording_name)
-
-    @staticmethod
-    def validate_upload_data(data: Dict) -> None:
-        """Validate upload data structure"""
-        if "recording_name" not in data:
-            raise ValidationError("Upload data must contain 'recording_name' field")
 
     @staticmethod
     def validate_browser_element_data(data: Dict) -> None:

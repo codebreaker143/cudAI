@@ -1,86 +1,88 @@
+# cudAI Recorder
 
-<h1 style="
-  font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;
-  font-size:48px;
-  font-weight:700;
-  line-height:1.25;
-  text-align:center;
-  margin:0 0 24px;">
-  AgentNetTool: Computer-Use Task Annotation Platform
-</h1>
+A desktop recorder that captures computer-use demonstrations (screen video,
+mouse, keyboard, active app/window and UI element context) for building
+annotated datasets. Accepting the recording terms is mandatory on first launch
+and cannot be withdrawn in the app. Nothing is recorded while paused, and
+recordings cannot be deleted from the app; raw files are locked (macOS
+`uchg`) once processed.
 
-<p align="center">
-&nbsp&nbsp🌐 <a href="https://opencua.xlang.ai/">Website</a>&nbsp&nbsp | &nbsp&nbsp📑 <a href="https://arxiv.org/abs/2508.09123">Paper</a>&nbsp&nbsp | &nbsp&nbsp🤗 <a href="https://huggingface.co/datasets/xlangai/AgentNet">Dataset</a>&nbsp&nbsp | &nbsp&nbsp🤖 <a href="https://huggingface.co/collections/xlangai/opencua-open-foundations-for-computer-use-agents-6882014ebecdbbe46074a68d">Model</a>&nbsp&nbsp | &nbsp&nbsp🔧  <a href="https://agentnet-tool.xlang.ai/">Tool Document</a>&nbsp&nbsp | &nbsp&nbsp🎮  <a href="https://huggingface.co/spaces/xlangai/OpenCUA-demo">Model Demo</a>&nbsp&nbsp 
-</p>
+## What a recording contains
 
-This is the code base of AgentNetTool in [OpenCUA: Open Foundations for Computer-Use Agents](https://opencua.xlang.ai/). AgentNetTool is a cross-platform software to annotate computer-use agent tasks. It can record the full video with all the keyboard and mouse inputs as well as the other important system meta data (HTML, A11ytree elements, ...) during the annotator performing the task. 
+Recordings are stored per user in the app data directory
+(macOS: `~/Library/Application Support/cudAI/recordings/<recording_id>/`).
 
-## Document: Installation, Setup and User Guidelines
-To use the AgentNetTool out of box, you can directly install AgentNetTool on your computer. Please follow the [AgentNetTool Documentation](https://agentnet-tool.xlang.ai/). The guide covers downloading, installation, setup, and instructions on how to start annotating with the tool.
+| File | Contents |
+| --- | --- |
+| `manifest.json` | Start here. Task, environment, consent, video and clock info, file index, stats and how to interpret timestamps (schema `cudai.recording.v1`). |
+| `timeline.jsonl` | Cleaned input events and active-window changes in time order, each with `t_video`, `frame` and `t_unix`. |
+| `video.mp4` | Main display, H.264, constant 30 fps. Paused periods are black frames so video time stays linear. |
+| `events.jsonl` | Raw input events (move, click, scroll, key press/release, pause/resume). |
+| `top_window.jsonl` | Active app, bundle id / exe path, window title and bounds. |
+| `element.jsonl` | Accessibility info for clicked UI elements. |
+| `reduced_events_complete.jsonl`, `reduced_events_vis.jsonl`, `video_clips/` | Actions reduced from raw events (click, drag, type, hotkey, scroll) and a short clip per action, used by the annotation UI. |
+| `metadata.json` | Full recorder-side metadata the manifest is built from. |
 
-## Build from source
-If you’d like to build the tool from source or modify its code, please follow the instructions below.
+Timing: every timestamp is a monotonic clock reading in seconds. The video's
+first frame is taken from the capture device's own timestamp (same clock), so
+`video_time = t - video.video_start_timestamp` is exact to the frame. Input
+coordinates are logical points; multiply by `display.scale_factor` for video
+pixels.
 
-Have Python >=3.11.
+Keyboard events carry `name` (physical key, stable across modifiers), `char`
+(what the OS produced), `text` (what the press contributed to typed text, if
+any) and `modifiers`. The app's own shortcuts and input to the cudAI window are
+excluded from the timeline and actions.
 
-Clone this repo and `cd` into it:
+## Development
+
+Requirements: macOS 12+ (Intel or Apple Silicon), Xcode command line tools,
+Python 3.12, Node 22.
+
 ```bash
-$ git clone https://github.com/xlang-ai/AgentNetTool.git
-$ cd AgentNetTool
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements_macos.txt
+cd agentnet-annotator
+scripts/build_ffmpeg_lgpl.sh   # LGPL FFmpeg for this Mac -> api/ffmpeg
+npm install
+npm start                      # Electron + Python backend
+CUDAI_DEVTOOLS=1 npm start     # same, with the Chromium inspector open
 ```
 
-Install the dependencies for this project:
+Grant Screen Recording, Accessibility and Input Monitoring to the app (or to
+your terminal when running from source).
+
+Tests:
+
 ```bash
-$ pip install -r requirements.txt
-$ cd agentnet-annotator
-$ npm install
+cd agentnet-annotator/api
+pip install pytest
+python -m pytest tests
 ```
 
-Build the application:
+Set `CUDAI_DATA_DIR` to use a different data directory (tests do this
+automatically; legacy-folder migration is skipped when it is set).
+
+Global shortcuts: ⌘⌥R start, ⌘⌥P pause/resume, ⌘⌥T stop (Ctrl+Alt on
+Windows).
+
+## Packaging
+
 ```bash
-$ npm run build-flask  # build backend
-$ npm run make
+cd agentnet-annotator
+scripts/build_ffmpeg_lgpl.sh universal   # x86_64 + arm64 FFmpeg
+npm run build-flask                      # PyInstaller backend
+npm run make
 ```
 
-The built application should be located in the generated `agentnet-annotator/out` directory, where you may find the software icon to start the tool. After this, follow the remaining relevant setup instructions in the document to set up OBS, plugin and other required configurations. 
+The bundled FFmpeg is an LGPL-2.1 build with no GPL/nonfree components; H.264
+is encoded by Apple VideoToolbox. The license and source notice ship in
+`api/licenses/`.
 
-Note: If you'd like to build the tool on Ubuntu, please use Ubuntu 22.04.
+## Attribution
 
-## Acknowledge
-<p>
-We thank Yu Su, Caiming Xiong, and the anonymous reviewers for their insightful discussions and valuable feedback. 
-We are grateful to Moonshot AI for providing training infrastructure and annotated data. 
-We also sincerely appreciate Hao Yang, Zhengtao Wang, and Yanxu Chen from the Kimi Team for their strong infrastructure support and helpful guidance. 
-The development of our tool is based on the open-source projects-<a href="https://github.com/TheDuckAI/DuckTrack" target="_blank">DuckTrack</a> and <a href="https://github.com/OpenAdaptAI/OpenAdapt" target="_blank">OpenAdapt</a>. 
-We are very grateful to their commitment to the open source community. Finally, we extend our deepest thanks to all annotators for their tremendous effort and contributions to this project.
-</p>
-
-## Research Use and Disclaimer
-
-OpenCUA is intended for **research and educational purposes only**. 
-
-### Prohibited Uses
-- The model, dataset, tool, and code may **not** be used for any purpose or activity that violates applicable laws or regulations in any jurisdiction
-- Use for illegal, unethical, or harmful activities is strictly prohibited
-
-### Disclaimer
-- The authors, contributors, and copyright holders are **not responsible** for any illegal, unethical, or harmful use of the Software, nor for any direct or indirect damages resulting from such use
-- Use of the "OpenCUA" name, logo, or trademarks does **not** imply any endorsement or affiliation unless separate written permission is obtained
-- Users are solely responsible for ensuring their use complies with applicable laws and regulations
-
-## Citation
-
-If you use OpenCUA in your research, please cite our work:
-
-```bibtex
-@misc{wang2025opencuaopenfoundationscomputeruse,
-      title={OpenCUA: Open Foundations for Computer-Use Agents}, 
-      author={Xinyuan Wang and Bowen Wang and Dunjie Lu and Junlin Yang and Tianbao Xie and Junli Wang and Jiaqi Deng and Xiaole Guo and Yiheng Xu and Chen Henry Wu and Zhennan Shen and Zhuokai Li and Ryan Li and Xiaochuan Li and Junda Chen and Boyuan Zheng and Peihang Li and Fangyu Lei and Ruisheng Cao and Yeqiao Fu and Dongchan Shin and Martin Shin and Jiarui Hu and Yuyan Wang and Jixuan Chen and Yuxiao Ye and Danyang Zhang and Dikang Du and Hao Hu and Huarong Chen and Zaida Zhou and Haotian Yao and Ziwei Chen and Qizheng Gu and Yipu Wang and Heng Wang and Diyi Yang and Victor Zhong and Flood Sung and Y. Charles and Zhilin Yang and Tao Yu},
-      year={2025},
-      eprint={2508.09123},
-      archivePrefix={arXiv},
-      primaryClass={cs.AI},
-      url={https://arxiv.org/abs/2508.09123}, 
-}
-```
-
+cudAI is derived from [AgentNetTool](https://github.com/xlang-ai/AgentNetTool)
+(OpenCUA), itself built on [DuckTrack](https://github.com/TheDuckAI/DuckTrack)
+and [OpenAdapt](https://github.com/OpenAdaptAI/OpenAdapt). AgentNetTool is
+released under the MIT License; its copyright notice is retained in
+[LICENSE](LICENSE) and must be included with any distribution.

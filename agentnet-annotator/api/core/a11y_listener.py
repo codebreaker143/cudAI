@@ -1,30 +1,37 @@
+import os
 import time
 
 from pynput import mouse
 from queue import Queue
 from threading import Thread
 
-from .a11y import get_active_element_data, get_top_window_name
+from .a11y import get_active_element_data, get_active_app_info
 from .logger import logger
 
 
-class A11yListener:
-    def __init__(self, generate_window_a11y, generate_element_a11y):
+def get_recorder_app_pid() -> int | None:
+    """PID of the cudAI desktop app, whose own windows must not be recorded."""
+    pid = os.environ.get("CUDAI_APP_PID")
+    return int(pid) if pid and pid.isdigit() else None
 
+
+class A11yListener:
+    POLL_INTERVAL = 0.2
+
+    def __init__(self, generate_window_a11y, generate_element_a11y):
         self._element_queue = Queue()
-        self._element_queue.queue.clear()
         self.gen_element = generate_element_a11y
         self.running = False
+        self.paused = False
+        self.recorder_pid = get_recorder_app_pid()
 
         self.mouse_listener = mouse.Listener(on_click=self.on_click)
         self._top_window_queue = Queue()
-        self.app_list = []
 
-        self.top_window_getter = Thread(target=self._get_top_window)
+        self.top_window_getter = Thread(target=self._get_top_window, daemon=True)
 
     def on_click(self, x, y, button, pressed):
-        if pressed:
-            self.scrolling = False
+        if pressed and not self.paused:
             timestamp = time.perf_counter()
             if self.gen_element:
                 Thread(
@@ -38,23 +45,36 @@ class A11yListener:
         )
 
     def _get_top_window(self):
-        last_window_name = None
+        last_key = None
 
         while self.running:
             try:
-                top_window_name = get_top_window_name()
-                if top_window_name != last_window_name and top_window_name is not None:
-                    self._top_window_queue.put(
-                        {
-                            "time_stamp": time.perf_counter(),
-                            "top_window_name": top_window_name,
-                        }
-                    )
-                last_window_name = top_window_name
-                time.sleep(0.2)
+                if self.paused:
+                    # Force a fresh record on resume.
+                    last_key = None
+                    time.sleep(self.POLL_INTERVAL)
+                    continue
 
-            except Exception as e:
+                info = get_active_app_info()
+                if info is not None:
+                    key = (info["pid"], info["window_title"])
+                    if key != last_key:
+                        info["is_recorder"] = (
+                            self.recorder_pid is not None
+                            and info["pid"] == self.recorder_pid
+                        )
+                        self._top_window_queue.put(
+                            {
+                                "time_stamp": time.perf_counter(),
+                                # Kept for compatibility with older readers.
+                                "top_window_name": info["app_name"],
+                                **info,
+                            }
+                        )
+                        last_key = key
+            except Exception:
                 logger.exception("a11y_listener _get_top_window error.")
+            time.sleep(self.POLL_INTERVAL)
 
     def start(self):
         self.running = True

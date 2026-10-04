@@ -80,3 +80,10 @@ def get_top_window():
 
 def get_top_window_name():
     return impl.get_top_window_name()
+
+
+def get_active_app_info() -> dict | None:
+    """Frontmost app name, bundle id / exe path, pid, window title and bounds."""
+    if impl is None:
+        return None
+    return impl.get_active_app_info()

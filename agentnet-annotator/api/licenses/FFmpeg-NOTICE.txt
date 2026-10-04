@@ -1,0 +1,11 @@
+cudAI includes FFmpeg (https://ffmpeg.org), version 7.1.2, licensed under the
+GNU Lesser General Public License version 2.1 or later (see
+FFmpeg-LGPL-2.1.txt).
+
+The bundled `ffmpeg` executable is built from the unmodified FFmpeg 7.1.2
+source release (https://ffmpeg.org/releases/ffmpeg-7.1.2.tar.xz) without GPL or
+nonfree components, using scripts/build_ffmpeg_lgpl.sh in the cudAI source
+repository. H.264 encoding uses Apple's VideoToolbox framework.
+
+The corresponding FFmpeg source code is available at the URL above, or on
+request from the cudAI distributor.

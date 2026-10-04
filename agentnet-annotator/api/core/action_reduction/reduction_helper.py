@@ -41,6 +41,14 @@ def wrap_func_key(key: str):
     else:
         return key
         
+def typed_key_name(event) -> str:
+    """
+    What a key press contributes to typed text: the produced character when
+    the recorder captured one (e.g. "T" or "@" with shift), else the key name.
+    """
+    return event.get("text") or event["name"]
+
+
 def init_event(event):
     key = build_key_from_event(event)
     event["start_time"] = event["time_stamp"]

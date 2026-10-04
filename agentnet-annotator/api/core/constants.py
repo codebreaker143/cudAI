@@ -1,39 +1,10 @@
-from enum import Enum
-
-SERVER_URL = "https://agentnet.xlang.ai"
-
-
-class RecordingStatus(Enum):
-    verifying = "verifying"
-    editing = "editing"
-    edited = "edited"
-    accepted = "accepted"
-    rejected = "rejected"
-    final_accept = "final_accept"
-    final_reject = "final_reject"
-    archived = "archived"
-    file_missing = "file_missing"
-    file_broken = "file_broken"
-    # local status
-    local = "local"
-    processing = "processing"
-
-
-REVIEW_RECORDING_STATUSES = ["verifying"]
-
-VERIFY_LIST_SIZE = 0
-
 SUCCEED = "succeed"
 FAILED = "failed"
 
-RECORDING_STATUS_TO_VIS_STATUS = {
-    "verifying": "Pending",
-    "accepted": "Accepted",
-    "rejected": "Rejected",
-    "archived": "Archived",
-}
+RECORDER_VERSION = "0.1.0"
+# Bump when the on-disk recording format changes.
+SCHEMA_VERSION = "cudai.recording.v1"
 
-EXCLUDE_LIST = ["recording_status.json", "hub_task_id.txt"]
 INCLUDE_LIST = ["video_clips", "reduced_events_vis.jsonl"]
 COMPLETE_DATA_LIST = [
     "events.jsonl",
@@ -120,4 +91,30 @@ VK_CODE = {
     105: "9",
     110: ".",
     12: "$Unknown$",
+}
+
+# macOS virtual keycodes (kVK_*, Carbon HIToolbox/Events.h) for printable keys.
+# Names are the unmodified key on a US (ANSI) layout; they identify the
+# physical key so press/release events match regardless of held modifiers.
+MAC_VK_CODE = {
+    0: "a", 1: "s", 2: "d", 3: "f", 4: "h", 5: "g", 6: "z", 7: "x",
+    8: "c", 9: "v", 10: "§", 11: "b", 12: "q", 13: "w", 14: "e", 15: "r",
+    16: "y", 17: "t", 18: "1", 19: "2", 20: "3", 21: "4", 22: "6", 23: "5",
+    24: "=", 25: "9", 26: "7", 27: "-", 28: "8", 29: "0", 30: "]", 31: "o",
+    32: "u", 33: "[", 34: "i", 35: "p", 37: "l", 38: "j", 39: "'", 40: "k",
+    41: ";", 42: "\\", 43: ",", 44: "/", 45: "n", 46: "m", 47: ".", 50: "`",
+    65: "numpad_decimal", 67: "numpad_multiply", 69: "numpad_add",
+    71: "numpad_clear", 75: "numpad_divide", 76: "numpad_enter",
+    78: "numpad_subtract", 81: "numpad_equal",
+    82: "num0", 83: "num1", 84: "num2", 85: "num3", 86: "num4",
+    87: "num5", 88: "num6", 89: "num7", 91: "num8", 92: "num9",
+    93: "yen", 94: "_", 95: "numpad_comma", 102: "lang2", 104: "lang1",
+}
+
+# Canonical modifier names recorded with each keyboard event.
+MODIFIER_KEY_NAMES = {
+    "shift": "shift", "shift_l": "shift", "shift_r": "shift",
+    "ctrl": "ctrl", "ctrl_l": "ctrl", "ctrl_r": "ctrl",
+    "alt": "alt", "alt_l": "alt", "alt_r": "alt", "alt_gr": "alt",
+    "cmd": "cmd", "cmd_l": "cmd", "cmd_r": "cmd",
 }

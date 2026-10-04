@@ -12,11 +12,19 @@ import {
   nativeImage,
   Tray,
   systemPreferences,
+  nativeTheme,
 } from "electron";
 import { spawn, ChildProcess, execSync } from "child_process";
 import axios from "axios";
 import path from "path";
-import { createTray, StartRecording, StopRecording, updateTrayIcon } from "./trayicon";
+import {
+  createTray,
+  PauseRecording,
+  StartRecording,
+  StopRecording,
+  updateTrayIcon,
+  APP_TITLE,
+} from "./trayicon";
 
 const log = require("electron-log");
 
@@ -38,17 +46,23 @@ const createWindow = (): void => {
   mainWindow = new BrowserWindow({
     width,
     height,
+    minWidth: 1100,
+    minHeight: 700,
+    title: APP_TITLE,
+    backgroundColor: nativeTheme.shouldUseDarkColors ? "#09090b" : "#ffffff",
     webPreferences: {
       preload: MAIN_WINDOW_PRELOAD_WEBPACK_ENTRY,
-      webSecurity: false,
       contextIsolation: true,
       nodeIntegration: false,
+      // No inspector in shipped builds.
+      devTools: !app.isPackaged,
     },
   });
 
   mainWindow.loadURL(MAIN_WINDOW_WEBPACK_ENTRY);
 
-  if (process.env.NODE_ENV === "development") {
+  // Opt-in while developing: CUDAI_DEVTOOLS=1 npm start
+  if (!app.isPackaged && process.env.CUDAI_DEVTOOLS === "1") {
     mainWindow.webContents.openDevTools();
   }
 
@@ -58,14 +72,16 @@ const createWindow = (): void => {
 };
 
 const startFlaskServer = (): void => {
+  // Lets the backend recognise (and exclude) input to cudAI's own windows.
+  const env = { ...process.env, CUDAI_APP_PID: String(process.pid) };
   if (app.isPackaged) {
     flaskProcess = spawn(path.join(process.resourcesPath, "backend/backend"), {
-      env: { ...process.env },
+      env,
       shell: false,
     });
   } else {
     flaskProcess = spawn("python", ["api/backend.py"], {
-      env: { ...process.env, FLASK_DEBUG: "1" },
+      env: { ...env, FLASK_DEBUG: "1" },
       shell: true,
     });
   }
@@ -132,7 +148,12 @@ app.on("ready", () => {
   });
   ipcMain.on("stop-record-icon", () => {
     StopRecording();
-    tray?.setTitle("AgentNet");
+  });
+  ipcMain.on("pause-record-icon", () => {
+    PauseRecording();
+  });
+  ipcMain.on("resume-record-icon", () => {
+    StartRecording();
   });
 
   ipcMain.on("tree-start", () => {
@@ -151,6 +172,10 @@ app.on("ready", () => {
 
   globalShortcut.register("CommandOrControl+Alt+T", () => {
     mainWindow?.webContents.send("stop-record");
+  });
+
+  globalShortcut.register("CommandOrControl+Alt+P", () => {
+    mainWindow?.webContents.send("toggle-pause-record");
   });
 
   // TODO: Add global shortcuts for AXTree: CommandOrControl+Shift+T
@@ -172,6 +197,21 @@ app.on("ready", () => {
         mainWindow.maximize();
       }
     }
+  });
+
+  // Reveal a recording (or the recordings folder) in Finder. Only paths inside
+  // the cudAI data directory are allowed.
+  ipcMain.on("show-in-folder", (_event, target: unknown) => {
+    if (typeof target !== "string") return;
+    const resolved = path.resolve(target);
+    const dataDir = path.join(app.getPath("home"), "Library", "Application Support", "cudAI");
+    if (process.platform === "darwin" && !resolved.startsWith(dataDir)) return;
+    shell.showItemInFolder(resolved);
+  });
+
+  // Used by the consent screen: the app cannot be used without consent.
+  ipcMain.on("quit-app", () => {
+    app.quit();
   });
 
   ipcMain.on("get_os_system", () => {

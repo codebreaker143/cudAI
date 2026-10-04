@@ -1,1 +1,1 @@
-"""Controllers module for AgentNet backend."""
+"""Controllers module for cudAI backend."""

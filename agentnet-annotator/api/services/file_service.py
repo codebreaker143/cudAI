@@ -6,7 +6,6 @@ from typing import Dict, Tuple
 
 from core.logger import logger
 from core.utils import (
-    read_encrypted_json,
     write_encrypt_line,
     init_encrpted_jsonl,
 )
@@ -23,34 +22,6 @@ class FileService:
     def set_active_recording(self, recording_path: str) -> None:
         """Set the active recording path."""
         self.active_recording_path = recording_path
-
-    def get_hub_data(
-        self, recording_name: str, recording_path: str
-    ) -> Tuple[str, Dict]:
-        """Get hub data for a recording."""
-        logger.info("FileService: get_hub_data")
-
-        task_name_path = os.path.join(recording_path, "task_name.json")
-        if not os.path.exists(task_name_path):
-            return SUCCEED, {
-                "hub_task_name": None,
-                "hub_task_description": None,
-                "success": False,
-            }
-
-        try:
-            task_data = read_encrypted_json(task_name_path)
-            return SUCCEED, {
-                "hub_task_name": task_data.get("task_name"),
-                "hub_task_description": task_data.get("description"),
-                "success": True,
-            }
-        except Exception as e:
-            logger.exception(f"FileService: get_hub_data failed: {e}")
-            return FAILED, {
-                "error": f"Failed to read hub data: {str(e)}",
-                "success": False,
-            }
 
     def append_browser_element(self, element_data: Dict) -> Tuple[str, str]:
         """Append browser element data to recording."""
@@ -107,33 +78,6 @@ class FileService:
             logger.exception(f"FileService: append_browser_html failed: {e}")
             return FAILED, f"Failed to append HTML: {str(e)}"
 
-    def get_recording_info(
-        self,
-        recording_name: str,
-        reviewing: bool = False,
-        user_recordings: Dict = None,
-        review_recordings: Dict = None,
-    ) -> Tuple[str, Dict]:
-        """Get local recording information."""
-        try:
-            if not recording_name:
-                return FAILED, {"error": "Recording name is required"}
-
-            recording_info = None
-            if reviewing and review_recordings:
-                recording_info = review_recordings.get(recording_name)
-            elif not reviewing and user_recordings:
-                recording_info = user_recordings.get(recording_name)
-
-            if not recording_info:
-                return FAILED, {"error": f"Recording {recording_name} not found"}
-
-            return SUCCEED, {"data": recording_info}
-
-        except Exception as e:
-            logger.exception(f"FileService: get_recording_info failed: {e}")
-            return FAILED, {"error": f"Failed to get recording info: {str(e)}"}
-
 
 class AccessibilityService:
     """Service for handling accessibility tree operations."""
@@ -171,34 +115,3 @@ class AccessibilityService:
             )
             return FAILED, f"Failed to save accessibility tree: {str(e)}"
 
-
-class FeedbackService:
-    """Service for handling user feedback."""
-
-    def __init__(self):
-        pass
-
-    def report_feedback(
-        self, feedback: str, recording_name: str = None, screenshot: str = None
-    ) -> Tuple[str, str]:
-        """Process and log user feedback."""
-        try:
-            logger.info(f"FeedbackService: Processing feedback")
-
-            if feedback:
-                logger.info(f"User feedback: {feedback}")
-
-            if screenshot:
-                logger.info("Screenshot feedback received")
-
-            if recording_name:
-                logger.info(f"Feedback for recording: {recording_name}")
-
-            # In a full implementation, this could save to database,
-            # send to analytics, etc.
-
-            return SUCCEED, "Feedback processed successfully"
-
-        except Exception as e:
-            logger.exception(f"FeedbackService: report_feedback failed: {e}")
-            return FAILED, f"Failed to process feedback: {str(e)}"

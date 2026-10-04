@@ -15,12 +15,14 @@ if __name__ == "__main__":
     from api.core.action_reduction.reduction_helper import (
         MODIFIED_KEYS, MOUSE_LONG_PRESS_INTERVAL,
         wrap_func_key,
+        typed_key_name,
     )
     from api.core.logger import logger
 else:
     from .reduction_helper import (
         MODIFIED_KEYS, MOUSE_LONG_PRESS_INTERVAL,
         wrap_func_key,
+        typed_key_name,
     )
     from ..logger import logger
 
@@ -350,7 +352,7 @@ class Type(Action):
             
         elif event["action"] == "press":
             self.action = "type"
-            self.key_names = [event["name"]]
+            self.key_names = [typed_key_name(event)]
             
         self.time_trace = [event["time_stamp"]]
         self.end_time = self.time_trace[-1] + 0.2
@@ -360,7 +362,7 @@ class Type(Action):
 
     def append(self, event):
         if isinstance(event, dict):
-            self.key_names.append(event["name"])
+            self.key_names.append(typed_key_name(event))
             self.time_trace.append(event["time_stamp"])
             self.end_time = self.time_trace[-1] + 0.2
         elif isinstance(event, Type):
@@ -378,7 +380,7 @@ class Type(Action):
         self.description = "⌨️ Type: "
         for key in self.key_names:
             self.description += wrap_func_key(key)
-        logger.error("transform {}".format(self.key_names))
+        logger.debug("transform {}".format(self.key_names))
 
     def process_video_segment(
         self, start_time, end_time, cap, out, video_attrs, window_attrs
@@ -465,8 +467,8 @@ class Click(Action):  # single, double, triple, drag
             if len(self.children) == 1 and self.children[0].action == "click":
                 return False
             else:
-                logger.warning("is_long_press")
-                logger.warning(f"{self.action}, {self.children[0].action}")
+                logger.debug("is_long_press")
+                logger.debug(f"{self.action}, {self.children[0].action}")
                 return self.end_time - self.start_time > MOUSE_LONG_PRESS_INTERVAL
         else:
             return False
@@ -492,7 +494,7 @@ class Click(Action):  # single, double, triple, drag
             child_action = self.children[0]
             if child_action.pre_move is not None:
                 if self.cal_distance(child_action) > 6:  # TODO: need time?
-                    logger.warning(f"{self.action} is drag")
+                    logger.debug(f"{self.action} is drag")
                     return True
         return False
 
@@ -763,7 +765,7 @@ class Press(Action):  # type, press, long press
                     and self.children[i - 1].start_time < self.children[i].start_time
                     and self.children[i - 1].end_time > self.children[i].end_time
                 ):
-                    logger.warning("Reducer: re-arrange: {} {} {}".format(
+                    logger.debug("Reducer: re-arrange: {} {} {}".format(
                         i-1, i, self.children[i].key))
                     child = self.children.pop(i)
                     self.children[i - 1].add_child(child)

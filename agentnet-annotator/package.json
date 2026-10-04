@@ -1,8 +1,8 @@
 {
-  "name": "vis",
-  "productName": "vis",
+  "name": "cudai-recorder",
+  "productName": "cudAI",
   "version": "1.0.0",
-  "description": "My Electron application description",
+  "description": "cudAI desktop recorder for computer-use data",
   "main": ".webpack/main",
   "scripts": {
     "prestart": "node -e \"if(process.platform !== 'win32') { require('child_process').exec('lsof -ti:5328 | xargs -I {} kill -9 {} >/dev/null 2>&1 || true', (err) => { if(err) console.log('Port cleanup skipped:', err.message); }); }\"",
@@ -50,8 +50,8 @@
   },
   "keywords": [],
   "author": {
-    "name": "BowenBryanWang",
-    "email": "wbw20@mails.tsinghua.edu.cn"
+    "name": "Sahul",
+    "email": "sahuliit@gmail.com"
   },
   "license": "MIT",
   "dependencies": {

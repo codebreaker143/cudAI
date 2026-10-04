@@ -73,6 +73,48 @@ def get_top_window_name() -> str:
         return "Desktop"
 
 
+def get_active_app_info() -> dict | None:
+    """
+    Frontmost application and its focused window.
+
+    Uses the front-to-back CGWindowList ordering rather than
+    NSWorkspace.frontmostApplication, which does not update in a process
+    without a running AppKit main loop.
+    """
+    windows = Quartz.CGWindowListCopyWindowInfo(
+        (
+            Quartz.kCGWindowListExcludeDesktopElements |
+            Quartz.kCGWindowListOptionOnScreenOnly
+        ),
+        Quartz.kCGNullWindowID,
+    )
+    for win in windows:
+        if win.get("kCGWindowLayer") != 0:
+            continue
+        owner = win.get("kCGWindowOwnerName", "")
+        if owner in ("Window Server", "Dock"):
+            continue
+        pid = int(win.get("kCGWindowOwnerPID", 0))
+        bundle_id = None
+        running_app = AppKit.NSRunningApplication.runningApplicationWithProcessIdentifier_(pid)
+        if running_app is not None and running_app.bundleIdentifier():
+            bundle_id = str(running_app.bundleIdentifier())
+        bounds = win.get("kCGWindowBounds") or {}
+        return {
+            "app_name": str(owner),
+            "bundle_id": bundle_id,
+            "pid": pid,
+            "window_title": str(win.get("kCGWindowName") or "") or None,
+            "window_bounds": {
+                "x": bounds.get("X"),
+                "y": bounds.get("Y"),
+                "width": bounds.get("Width"),
+                "height": bounds.get("Height"),
+            } if bounds else None,
+        }
+    return None
+
+
 def get_active_window_meta() -> dict:
     """
     Get the metadata of the active window.
