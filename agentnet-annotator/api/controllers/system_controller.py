@@ -3,6 +3,7 @@
 from flask import request
 from typing import Tuple, Dict, Any
 from core.backend_func import save_task
+from core.permissions import check_permissions, request_permission
 from core.consent import CONSENT_VERSION, get_consent, get_contributor_id, record_consent
 from core.constants import RECORDER_VERSION, SCHEMA_VERSION
 from core.utils import RECORDING_DIR, get_app_data_dir
@@ -18,10 +19,15 @@ class SystemController:
 
     @handle_api_errors
     def check_permissions(self) -> Tuple[Dict[str, Any], int]:
-        """Check system permissions."""
-        return ErrorHandler.create_success_response(
-            message="Permission check completed"
-        )
+        """Status of the macOS permissions a complete recording needs."""
+        return ErrorHandler.create_success_response(check_permissions())
+
+    @handle_api_errors
+    def request_permission(self) -> Tuple[Dict[str, Any], int]:
+        data = request.json or {}
+        Validator.validate_required_fields(data, ["name"])
+        request_permission(str(data["name"]))
+        return ErrorHandler.create_success_response(check_permissions())
 
     @handle_api_errors
     def get_consent(self) -> Tuple[Dict[str, Any], int]:

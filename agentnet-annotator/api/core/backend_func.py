@@ -1,7 +1,6 @@
 import os
 import json
 import uuid
-import shutil
 from flask import jsonify, request
 
 from .logger import logger
@@ -194,18 +193,6 @@ def annotate_task(recording_name, socketservice):
         write_encrypted_jsonl(
             os.path.join(new_folder_path, "top_window.jsonl"), new_top_windows
         )
-    # save video clips
-    os.mkdir(os.path.join(new_folder_path, "video_clips"))
-    video_clips = os.listdir(os.path.join(folder_path, "video_clips"))
-    video_clips.sort(key=lambda x: int(x.split("_")[0]))
-    for idx, clip_name in enumerate(video_clips[start_idx : end_idx + 1]):
-        clip_action = clip_name.split("_")[1].split(".")[0]
-        new_clip_name = f"{idx}_{clip_action}.mp4"
-        shutil.copy(
-            os.path.join(folder_path, "video_clips", clip_name),
-            os.path.join(new_folder_path, "video_clips", new_clip_name),
-        )
-
     # edit full video
     old_video_path = find_mp4(folder_path)
     cut_video(
@@ -234,28 +221,6 @@ def read_recording_status(recording_path):
     else:
         recording_status = None
     return recording_status
-
-
-def get_full_video(recording_name):  # TODO: check if delete files affect
-
-    folder_path = os.path.join(RECORDING_DIR, recording_name)
-    if not os.path.exists(folder_path) or not os.path.isdir(folder_path):
-        return jsonify({"error": "Recording not found"}), 404
-
-    # fetch single video
-    video_name = find_mp4(folder_path)
-    try:
-        return (
-            jsonify(
-                {
-                    "success": "successfully pass video path",
-                    "path": os.path.join(folder_path, video_name),
-                }
-            ),
-            200,
-        )
-    except Exception as e:
-        return jsonify({"error": str(e)}), 404
 
 
 def save_task():

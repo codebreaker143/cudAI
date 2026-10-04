@@ -11,7 +11,7 @@ from pynput.keyboard import Key, KeyCode
 from typing import List
 
 from .logger import logger
-from .constants import VK_CODE, MAC_VK_CODE, INCLUDE_LIST
+from .constants import VK_CODE, MAC_VK_CODE
 
 APP_NAME = "cudAI"
 
@@ -23,8 +23,7 @@ def write_encrypt_line(fp, data):
 
 
 def init_encrpted_jsonl(path):
-    with open(path, "w", encoding="utf-8") as f:
-        pass
+    open(path, "w", encoding="utf-8").close()
 
 
 def write_encrypted_jsonl(path, data: List):
@@ -152,14 +151,6 @@ def lock_raw_files(recording_path: str) -> None:
                 logger.warning(f"Could not lock {path}: {e}")
 
 
-def get_video_by_id(video_path, id):
-    for file_name in os.listdir(video_path):
-        video_id = file_name.split("_")[0]
-        if video_id == str(id):
-            return file_name
-    return None
-
-
 def get_task_name_from_folder(recording_name):
     recording_path = os.path.join(RECORDING_DIR, recording_name)
     task_name_path = os.path.join(recording_path, "task_name.json")
@@ -188,49 +179,21 @@ def get_description_from_folder(recording_name):
             return task["description"].strip()
 
 
-def check_recording_broken(recording_name: str) -> bool:
+def check_recording_visualizable(recording_name: str) -> bool:
+    """Processed and reviewable: actions were extracted and the video exists."""
     recording_path = os.path.join(RECORDING_DIR, recording_name)
-
-    if not os.path.exists(recording_path):
-        logger.warning(f"check_recording_broken: {recording_path} doesn't exist.")
-        return True
-
-    vis_path = os.path.join(recording_path, "reduced_events_vis.jsonl")
-    if not os.path.exists(vis_path):
-        return True
-
-    video_clips_path = os.path.join(recording_path, "video_clips")
-    if not os.path.exists(video_clips_path):
-        return True
-
-    return False
-
-
-def check_recording_visualizable(recording_name):
-    recording_path = os.path.join(RECORDING_DIR, recording_name)
-
-    if not os.path.exists(recording_path):
-        logger.warning(f"check_recording_visualizable: {recording_path} doesn't exist.")
-        return False
-
-    for file_name in INCLUDE_LIST:
-        file_path = os.path.join(recording_path, file_name)
-        if not os.path.exists(file_path):
-            logger.warning(
-                f"check_recording_visualizable: {file_name} doesn't exist in {recording_path}"
-            )
-            return False
-
-    vis_path = os.path.join(recording_path, "reduced_events_vis.jsonl")
-    if os.path.exists(vis_path):
-        #vis_data = read_encrypted_jsonl(vis_path)
-        if os.path.exists(os.path.join(recording_path, "video_clips")):
-            if len(os.listdir(os.path.join(recording_path, "video_clips"))) > 0:
-                return True
-    logger.warning(
-        f"check_recording_visualizable: video clip number doesn't match in {recording_path}"
+    return all(
+        os.path.exists(os.path.join(recording_path, name))
+        for name in ("reduced_events_vis.jsonl", "video.mp4")
     )
-    return False
+
+
+def check_recording_broken(recording_name: str) -> bool:
+    """Processing finished but the video is missing."""
+    recording_path = os.path.join(RECORDING_DIR, recording_name)
+    return os.path.exists(
+        os.path.join(recording_path, "reduced_events_vis.jsonl")
+    ) and not os.path.exists(os.path.join(recording_path, "video.mp4"))
 
 
 def get_latest_folder(parent_directory):

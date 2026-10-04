@@ -128,7 +128,6 @@ def write_export(recording_path: str) -> dict | None:
         task_path = os.path.join(recording_path, "task_name.json")
         task = read_encrypted_json(task_path) if os.path.exists(task_path) else {}
         actions = _read_jsonl(os.path.join(recording_path, "reduced_events_complete.jsonl"))
-        clips_dir = os.path.join(recording_path, "video_clips")
 
         counts = Counter(e["type"] for e in timeline)
         apps = []
@@ -181,14 +180,10 @@ def write_export(recording_path: str) -> dict | None:
                 "clicked_elements": "element.jsonl",
                 "actions": "reduced_events_complete.jsonl",
                 "actions_annotated": "reduced_events_vis.jsonl",
-                "action_clips": "video_clips/",
             },
             "stats": {
                 "event_counts": dict(counts),
                 "action_count": len(actions),
-                "action_clip_count": (
-                    len(os.listdir(clips_dir)) if os.path.isdir(clips_dir) else 0
-                ),
                 "apps": apps,
             },
         }

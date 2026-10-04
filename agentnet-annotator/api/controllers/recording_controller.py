@@ -5,7 +5,7 @@ import os
 from flask import request, send_file
 from typing import Tuple, Dict, Any
 
-from core.backend_func import annotate_task, get_full_video
+from core.backend_func import annotate_task
 from core.utils import RECORDING_DIR
 from services.recording_service import RecordingService
 from services.file_service import FileService
@@ -35,17 +35,6 @@ class RecordingController:
         return ErrorHandler.handle_service_response((status, data))
 
     @handle_api_errors
-    def get_video(self, recording_name: str, event_index: str) -> Tuple[Dict[str, Any], int]:
-        """Get video path for a specific event."""
-        Validator.validate_recording_name(recording_name)
-        validated_index = Validator.validate_event_index(event_index)
-
-        status, data = self.recording_service.get_video_path(
-            recording_name, str(validated_index)
-        )
-        return ErrorHandler.handle_service_response((status, data))
-
-    @handle_api_errors
     def confirm_recording(self, recording_name: str) -> Tuple[Dict[str, Any], int]:
         """Confirm and save recording modifications."""
         Validator.validate_recording_name(recording_name)
@@ -71,17 +60,6 @@ class RecordingController:
             return result
         except Exception as e:
             return ErrorHandler.create_error_response(f"Failed to annotate task: {str(e)}")
-
-    @handle_api_errors
-    def get_full_video_endpoint(self, recording_name: str) -> Tuple[Dict[str, Any], int]:
-        """Get full video for recording."""
-        Validator.validate_recording_name(recording_name)
-
-        try:
-            result = get_full_video(recording_name)
-            return result
-        except Exception as e:
-            return ErrorHandler.create_error_response(f"Failed to get full video: {str(e)}")
 
     @handle_api_errors
     def get_review(self, recording_name: str) -> Tuple[Dict[str, Any], int]:

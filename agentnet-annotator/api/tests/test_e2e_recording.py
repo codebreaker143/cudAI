@@ -1,0 +1,78 @@
+"""
+End-to-end recording with real screen capture (macOS).
+
+Records your screen for a few seconds, so it only runs when enabled:
+
+    CUDAI_E2E=1 python -m pytest tests/test_e2e_recording.py -s
+
+Needs Screen Recording, Input Monitoring and Accessibility for the terminal.
+"""
+
+import json
+import os
+import time
+
+import pytest
+
+pytestmark = pytest.mark.skipif(
+    os.environ.get("CUDAI_E2E") != "1", reason="set CUDAI_E2E=1 to record the screen"
+)
+
+
+def reply(client, event, timeout=180):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        for message in client.get_received():
+            if message["name"] == event:
+                return message["args"][0]
+        time.sleep(0.1)
+    raise TimeoutError(event)
+
+
+def test_record_pause_resume_stop_and_process():
+    from backend import CudaiBackend
+    from core.permissions import missing_permissions
+    from core.utils import RECORDING_DIR
+
+    assert not missing_permissions(), f"grant permissions first: {missing_permissions()}"
+
+    backend = CudaiBackend()
+    http = backend.app.test_client()
+    sio = backend.socketio.test_client(backend.app)
+
+    sio.emit("start_record", {})
+    assert reply(sio, "start_record")["status"] == "failed"  # no consent yet
+
+    version = http.get("/api/consent").get_json()["current_version"]
+    assert http.post("/api/consent", json={"accepted": True, "version": version}).status_code == 200
+
+    for event, wait in (("start_record", 3), ("pause_record", 2), ("resume_record", 2), ("stop_record", 0)):
+        sio.emit(event, {})
+        assert reply(sio, event)["status"] == "succeed", event
+        time.sleep(wait)
+    assert reply(sio, "reduced")["status"] == "succeed"
+
+    (name,) = os.listdir(RECORDING_DIR)
+    folder = os.path.join(RECORDING_DIR, name)
+    for required in ("video.mp4", "metadata.json", "manifest.json", "timeline.jsonl", "reduced_events_vis.jsonl"):
+        assert os.path.exists(os.path.join(folder, required)), required
+    assert not os.path.exists(os.path.join(folder, "segments"))
+
+    metadata = json.load(open(os.path.join(folder, "metadata.json")))
+    video = metadata["video"]
+    assert len(video["segments"]) == 2 and len(video["paused_gaps"]) == 1
+    assert len(metadata["pauses"]) == 1
+    assert metadata["consent"]["version"] == version
+    # Timeline stays linear across the pause.
+    second = video["segments"][1]
+    assert second["video_offset"] == pytest.approx(
+        second["start_timestamp"] - video["video_start_timestamp"], abs=1 / 30 + 1e-6
+    )
+
+    review = http.get(f"/api/recording/{name}/review").get_json()
+    assert review["status"] == "succeed"
+    video_response = http.get(review["video_url"], headers={"Range": "bytes=0-99"})
+    assert video_response.status_code == 206
+
+    # Raw files are locked after processing; unlock so the temp dir can be removed.
+    os.system(f"chflags -R nouchg '{folder}'")

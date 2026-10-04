@@ -5,6 +5,7 @@ import { formatDate } from "../../lib/format";
 import { Button, Card, Kbd, PageHeader } from "../ui";
 import { useMain } from "../../context/MainContext";
 import TermsAndConsent from "../prerequisite/Terms";
+import { PermissionList, usePermissions } from "../prerequisite/Permissions";
 
 interface SystemInfo {
     version: string;
@@ -34,6 +35,7 @@ export default function SettingsPage() {
     const [info, setInfo] = useState<SystemInfo | null>(null);
     const [consent, setConsent] = useState<ConsentInfo | null>(null);
     const [showTerms, setShowTerms] = useState(false);
+    const { state: permissions, refresh: refreshPermissions } = usePermissions(3000);
     const mod = myos === "darwin" ? "⌘ ⌥" : "Ctrl Alt";
 
     useEffect(() => {
@@ -58,6 +60,17 @@ export default function SettingsPage() {
         <div className="flex-1 overflow-y-auto">
             <PageHeader title="Settings" description="Storage, shortcuts and the terms you accepted." />
             <div className="max-w-3xl space-y-6 p-8">
+                <Card>
+                    <h2 className="border-b border-zinc-100 px-5 py-3 text-sm font-semibold text-zinc-900 dark:border-zinc-800 dark:text-zinc-100">
+                        Permissions
+                    </h2>
+                    {permissions ? (
+                        <PermissionList state={permissions} onChanged={refreshPermissions} />
+                    ) : (
+                        <p className="px-5 py-4 text-sm text-zinc-500">Checking…</p>
+                    )}
+                </Card>
+
                 <Card>
                     <h2 className="border-b border-zinc-100 px-5 py-3 text-sm font-semibold text-zinc-900 dark:border-zinc-800 dark:text-zinc-100">
                         Storage

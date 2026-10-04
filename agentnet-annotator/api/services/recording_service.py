@@ -2,7 +2,9 @@
 
 import json
 import os
+import shutil
 import threading
+import time
 import pyautogui
 from queue import Queue
 from datetime import datetime
@@ -14,7 +16,6 @@ from core.action_reduction import Reducer
 from core.utils import (
     get_task_name_from_folder,
     get_description_from_folder,
-    get_video_by_id,
     RECORDING_DIR,
     read_encrypted_json,
     read_encrypted_jsonl,
@@ -26,6 +27,7 @@ from core.utils import (
 )
 from core.backend_func import read_recording_status
 from core.consent import has_current_consent
+from core.permissions import missing_permissions
 from core.export import build_timeline, write_export
 from core.recovery import (
     find_interrupted_recordings,
@@ -33,6 +35,16 @@ from core.recovery import (
     stop_orphaned_captures,
 )
 from core.constants import SUCCEED, FAILED
+
+
+# Disk space guard (bytes). Video is ~0.5-1.5 GB per hour.
+MIN_FREE_BYTES_TO_START = 2 * 1024**3
+MIN_FREE_BYTES_WHILE_RECORDING = 500 * 1024**2
+DISK_CHECK_INTERVAL = 10
+
+
+def free_disk_bytes() -> int:
+    return shutil.disk_usage(RECORDING_DIR).free
 
 
 class RecordingService:
@@ -56,6 +68,9 @@ class RecordingService:
             target=self._process_reducer_queue, daemon=True
         )
         self.reducer_thread.start()
+
+        # Start/stop/pause can come from the UI, shortcuts and the disk monitor.
+        self._lifecycle_lock = threading.RLock()
 
         threading.Thread(target=self._recover_interrupted, daemon=True).start()
 
@@ -85,6 +100,10 @@ class RecordingService:
         )
 
     def start_recording(self) -> Tuple[str, str]:
+        with self._lifecycle_lock:
+            return self._start_recording()
+
+    def _start_recording(self) -> Tuple[str, str]:
         """Start a new recording session."""
         logger.info("RecordingService: start_recording")
 
@@ -93,6 +112,20 @@ class RecordingService:
 
         if not has_current_consent():
             return FAILED, "Please review and accept the recording terms first"
+
+        free = free_disk_bytes()
+        if free < MIN_FREE_BYTES_TO_START:
+            return FAILED, (
+                f"Only {free / 1e9:.1f} GB of disk space is free. "
+                f"Free up at least {MIN_FREE_BYTES_TO_START / 1e9:.0f} GB to record."
+            )
+
+        missing = missing_permissions()
+        if missing:
+            return FAILED, (
+                f"cudAI needs {', '.join(missing)} permission to record. "
+                "Grant it in System Settings › Privacy & Security, then restart cudAI."
+            )
 
         try:
             self.recorder_thread = Recorder(
@@ -114,6 +147,9 @@ class RecordingService:
             )
 
             self.recorder_thread.start_recording()
+            threading.Thread(
+                target=self._monitor_disk, args=(self.recorder_thread,), daemon=True
+            ).start()
             logger.info("RecordingService: Recording started successfully")
             return SUCCEED, "Recording started successfully"
 
@@ -123,33 +159,69 @@ class RecordingService:
             return FAILED, f"Failed to start recording: {str(e)}"
 
     def stop_recording(self) -> Tuple[str, str]:
+        with self._lifecycle_lock:
+            return self._stop_recording()
+
+    def _stop_recording(self) -> Tuple[str, str]:
         """Stop the current recording session."""
         logger.info("RecordingService: stop_recording")
 
-        if not hasattr(self, "recorder_thread") or self.recorder_thread is None:
+        recorder = self.recorder_thread
+        if recorder is None:
             return FAILED, "No active recording"
 
+        recording_id = os.path.basename(recorder.recording_path)
         try:
-            recording_id = os.path.basename(self.recorder_thread.recording_path)
-
-            self.recorder_thread.stop_recording()
-
-            # Mark recording as processing while the reducer works.
-            if self.user_recordings and recording_id in self.user_recordings:
-                self.user_recordings[recording_id]["status"] = "processing"
-                self.user_recordings[recording_id]["visualizable"] = False
-
-            self.reducer_queue.put(self.reducer)
-            self.recorder_thread = None
-
-            logger.info("RecordingService: Recording stopped successfully")
-            return SUCCEED, "Recording stopped successfully"
-
+            recorder.stop_recording()
         except Exception as e:
             logger.exception("RecordingService: stop_recording failed")
-            return FAILED, f"Failed to stop recording: {str(e)}"
+            return FAILED, (
+                f"The recording could not be finalized ({e}). "
+                "It will be recovered the next time cudAI starts."
+            )
+        finally:
+            # Never leave the service stuck in "recording".
+            self.recorder_thread = None
+
+        # Mark recording as processing while the reducer works.
+        if self.user_recordings and recording_id in self.user_recordings:
+            self.user_recordings[recording_id]["status"] = "processing"
+            self.user_recordings[recording_id]["visualizable"] = False
+
+        self.reducer_queue.put(self.reducer)
+        logger.info("RecordingService: Recording stopped successfully")
+        return SUCCEED, "Recording stopped successfully"
+
+    def _monitor_disk(self, recorder) -> None:
+        """Stop the recording cleanly before the disk fills up."""
+        while self.recorder_thread is recorder:
+            time.sleep(DISK_CHECK_INTERVAL)
+            if self.recorder_thread is not recorder:
+                return
+            free = free_disk_bytes()
+            if free >= MIN_FREE_BYTES_WHILE_RECORDING:
+                continue
+            logger.warning(f"RecordingService: low disk space ({free} bytes), stopping")
+            with self._lifecycle_lock:
+                if self.recorder_thread is not recorder:
+                    return
+                status, message = self._stop_recording()
+            self.socketio.emit(
+                "recording_auto_stopped",
+                {
+                    "reason": "low_disk",
+                    "message": "Recording stopped and saved: your disk is almost full.",
+                    "stopped": status == SUCCEED,
+                    "detail": message,
+                },
+            )
+            return
 
     def pause_recording(self) -> Tuple[str, str]:
+        with self._lifecycle_lock:
+            return self._pause_recording()
+
+    def _pause_recording(self) -> Tuple[str, str]:
         if self.recorder_thread is None:
             return FAILED, "No active recording"
         try:
@@ -161,6 +233,10 @@ class RecordingService:
             return FAILED, f"Failed to pause recording: {str(e)}"
 
     def resume_recording(self) -> Tuple[str, str]:
+        with self._lifecycle_lock:
+            return self._resume_recording()
+
+    def _resume_recording(self) -> Tuple[str, str]:
         if self.recorder_thread is None:
             return FAILED, "No active recording"
         try:
@@ -303,7 +379,6 @@ class RecordingService:
 
         try:
             folder_path = os.path.join(RECORDING_DIR, recording_name)
-            self._remove_unused_videos(folder_path, events_data)
             self._save_modified_events(folder_path, events_data)
             write_export(folder_path)
             return SUCCEED, "Recording modifications saved successfully"
@@ -311,37 +386,6 @@ class RecordingService:
         except Exception as e:
             logger.exception("RecordingService: confirm_recording failed")
             return FAILED, f"Failed to confirm recording: {str(e)}"
-
-    def get_video_path(self, recording_name: str, event_index: str) -> Tuple[str, Dict]:
-        """Get video path for a specific event."""
-        if self.opened_single_recording is None:
-            return FAILED, {"error": "No recording opened"}
-
-        if self.opened_single_recording["recording_name"] != recording_name:
-            return FAILED, {"error": "Wrong recording opened"}
-
-        try:
-            videos_folder_path = os.path.join(
-                RECORDING_DIR, recording_name, "video_clips"
-            )
-
-            if not os.path.exists(videos_folder_path):
-                return FAILED, {"error": "Recording is still processing"}
-
-            event = self.opened_single_recording["events"][int(event_index)]
-            video_name = get_video_by_id(
-                video_path=videos_folder_path,
-                id=event["id"],
-            )
-
-            return SUCCEED, {
-                "success": "Video path retrieved successfully",
-                "path": os.path.join(videos_folder_path, video_name),
-            }
-
-        except Exception as e:
-            logger.warning(f"RecordingService: get_video_path failed: {e}")
-            return FAILED, {"error": str(e)}
 
     def toggle_window_a11y(self, flag: bool) -> None:
         """Toggle window accessibility generation."""
@@ -575,40 +619,6 @@ class RecordingService:
         return read_encrypted_jsonl(
             events_file_path
         )
-
-    def _remove_unused_videos(
-        self,
-        folder_path: str,
-        events_data: list,
-    ) -> None:
-        """Remove video files that are no longer used."""
-
-        ids_left = [
-            event["id"]
-            for event in events_data
-        ]
-
-        for action in self.opened_single_recording[
-            "events"
-        ]:
-            if action["id"] not in ids_left:
-                video_path = os.path.join(
-                    folder_path,
-                    "video_clips",
-                    (
-                        f"{action['id']}_"
-                        f"{action['action']}.mp4"
-                    ),
-                )
-
-                if os.path.exists(video_path):
-                    os.remove(video_path)
-
-                    logger.info(
-                        "RecordingService: Removed "
-                        f"{action['id']}_"
-                        f"{action['action']}.mp4"
-                    )
 
     def _save_modified_events(
         self,

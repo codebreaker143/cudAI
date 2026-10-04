@@ -5,20 +5,6 @@ RECORDER_VERSION = "0.1.0"
 # Bump when the on-disk recording format changes.
 SCHEMA_VERSION = "cudai.recording.v1"
 
-INCLUDE_LIST = ["video_clips", "reduced_events_vis.jsonl"]
-COMPLETE_DATA_LIST = [
-    "events.jsonl",
-    "event_buffer.jsonl",
-    "element.jsonl",
-    "html.jsonl",
-    "html_element.jsonl",
-    "a11y.jsonl",
-    "reduced_events_complete.jsonl",
-    "reduced_events_vis.jsonl",
-    "top_window.jsonl",
-]
-
-
 VK_CODE = {
     8: "Backspace",
     9: "Tab",

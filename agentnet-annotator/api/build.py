@@ -11,9 +11,6 @@ if system() == "Darwin":
 elif system() == "Windows":
     ffmpeg = backend_dir / "ffmpeg.exe"
 
-# dll on windows
-if system() == "Windows":
-    libs = backend_dir / "libs"
 
 for dir_to_remove in ["dist", "build"]:
     dir_path = backend_dir / dir_to_remove
@@ -33,7 +30,6 @@ if system() == "Darwin":
 else:
     pyinstaller_cmd = [
         "pyinstaller", "--onedir",
-        f"--add-data={libs}{';' if system() == 'Windows' else ':'}{libs}",
         f"--add-data={ffmpeg}{';' if system() == 'Windows' else ':'}{backend_dir / 'ffmpeg'}",
         "--hidden-import", "gevent-websocket",
         "--runtime-hook", "runtime-hook.py",

@@ -3,6 +3,7 @@ import { Outlet } from "react-router-dom";
 
 import Sidebar from "../components/Sidebar";
 import TermsAndConsent from "../components/prerequisite/Terms";
+import PermissionsSetup, { usePermissions } from "../components/prerequisite/Permissions";
 import { Spinner } from "../components/ui";
 import { api } from "../lib/api";
 
@@ -13,6 +14,9 @@ interface ConsentState {
 
 export default function App() {
   const [consent, setConsent] = React.useState<ConsentState | null>(null);
+  const { state: permissions } = usePermissions();
+  const [permissionsDone, setPermissionsDone] = React.useState(false);
+  const onPermissionsGranted = React.useCallback(() => setPermissionsDone(true), []);
 
   const loadConsent = React.useCallback(async () => {
     try {
@@ -27,7 +31,7 @@ export default function App() {
     loadConsent();
   }, [loadConsent]);
 
-  if (consent === null) {
+  if (consent === null || permissions === null) {
     return (
       <div className="flex h-full items-center justify-center bg-white text-zinc-400 dark:bg-zinc-950">
         <Spinner className="h-6 w-6" />
@@ -45,6 +49,10 @@ export default function App() {
         />
       </div>
     );
+  }
+
+  if (!permissions.all_granted && !permissionsDone) {
+    return <PermissionsSetup onContinue={onPermissionsGranted} />;
   }
 
   return (

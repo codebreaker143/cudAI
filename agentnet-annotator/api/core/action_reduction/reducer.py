@@ -1,72 +1,25 @@
 import os
-import re
-import sys
-import time
-import json
-import threading
-import queue
-import platform
-import ctypes
-import re
-from pathlib import Path
 import shutil
+import time
 
+from typing import Dict, List
 
-def set_dll_path():
-    # Determine the architecture of the system
-    is_64bits = platform.architecture()[0] == "64bit"
-
-    # Check if running in a PyInstaller packaged environment
-    if hasattr(sys, "_MEIPASS"):
-        # Running in packaged environment
-        base_path = Path(sys._MEIPASS) / "libs"
-    else:
-        # Running in development environment
-        base_path = Path(__file__).resolve().parent.parent.parent / "libs"
-
-    # Set DLL path based on architecture
-    dll_name = "openh264-1.8.0-win64.dll" if is_64bits else "openh264-1.8.0-win32.dll"
-    dll_path = base_path / dll_name
-
-    if not dll_path.exists():
-        raise FileNotFoundError(f"Required DLL not found: {dll_path}")
-
-    ctypes.CDLL(str(dll_path))
-
-
-# Call the function to set the DLL path
-if platform.system() == "Windows":
-    set_dll_path()
-
-
-if __name__ == "__main__":
-    import sys
-
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    parent_dir = os.path.abspath(os.path.join(current_dir, "../../../"))
-    sys.path.append(parent_dir)
-    from api.core.action_reduction.action import *
-    from api.core.action_reduction.reduction_helper import *
-    from api.core.logger import logger
-    from api.core.a11y import parse_element
-    from api.core.utils import (
-        get_recordings_dir,
-        write_encrypted_jsonl,
-        read_encrypted_jsonl,
-    )
-else:
-    from .action import *
-    from .reduction_helper import *
-    from .preprocess import preprocess_events
-    from ..logger import logger
-    from ..a11y import parse_element
-    from ..utils import (
-        get_recordings_dir,
-        write_encrypted_jsonl,
-        read_encrypted_jsonl,
-        write_encrypt_line,
-        write_encrypted_json,
-    )
+from .action import Click, Press, Scroll, Type
+from .reduction_helper import (
+    CLICK_INTERVAL,
+    MODIFIED_KEYS,
+    init_event,
+    is_event_key_match,
+    typed_key_name,
+    wrap_func_key,
+)
+from .preprocess import preprocess_events
+from ..logger import logger
+from ..a11y import parse_element
+from ..utils import (
+    write_encrypted_jsonl,
+    read_encrypted_jsonl,
+)
 
 
 class Reducer:
@@ -654,7 +607,7 @@ class Reducer:
                         len(action.children) == 1
                         and action.children[0].action == "drag"
                     ):
-                        action.description += f" + drag"
+                        action.description += " + drag"
                     else:
                         all_click_children = 0
                         for child in action.children:
@@ -674,41 +627,6 @@ class Reducer:
             del self.reduced_actions[self.complete_idx + 1 : len(self.reduced_actions)]
 
         logger.debug(f"finish {len(self.reduced_actions)}")
-
-    def process_actions_multithreaded(self, recording_path, video_attrs, window_attrs):
-        def process_action(action, recording_path, video_attrs, window_attrs):
-            action.to_video(
-                recording_path=recording_path,
-                video_attrs=video_attrs,
-                window_attrs=window_attrs,
-            )
-
-        threads = []
-        max_threads = 8
-        q = queue.Queue()
-
-        # Enqueue all actions
-        for action in self.reduced_actions:
-            q.put(action)
-
-        # Function to process actions from the queue
-        def worker():
-            while not q.empty():
-                action = q.get()
-                if action is None:
-                    break
-                process_action(action, recording_path, video_attrs, window_attrs)
-                q.task_done()
-
-        # Start initial batch of threads
-        for _ in range(min(max_threads, len(self.reduced_actions))):
-            thread = threading.Thread(target=worker)
-            threads.append(thread)
-            thread.start()
-
-        # Wait for all threads to finish
-        for thread in threads:
-            thread.join()
 
     def _save_action(self, action):
         action.complete_dump(recording_dir=self.recording_path)
@@ -821,8 +739,7 @@ class Reducer:
         html_data = []
         if os.path.exists(html_data_path):
             html_data = read_encrypted_jsonl(html_data_path)
-            with open(html_data_path, "w", encoding="utf-8") as f:
-                pass
+            open(html_data_path, "w", encoding="utf-8").close()
 
         saved_htmls = set()
 
@@ -948,11 +865,9 @@ class Reducer:
             )
             events = preprocess_events(events, top_windows)
 
-            video_path = os.path.join(recording_path, "video_clips")
-            if os.path.exists(video_path):
-                if os.path.isdir(video_path):
-                    shutil.rmtree(video_path)
-                    os.makedirs(video_path, exist_ok=True)
+            # Per-action clips are no longer produced; the review UI seeks
+            # the full video. Drop clips left by older versions.
+            shutil.rmtree(os.path.join(recording_path, "video_clips"), ignore_errors=True)
             if os.path.exists(os.path.join(recording_path, "reduced_events_vis.jsonl")):
                 os.remove(os.path.join(recording_path, "reduced_events_vis.jsonl"))
             if os.path.exists(
@@ -976,8 +891,6 @@ class Reducer:
             for i, action in enumerate(self.reduced_actions):
                 action.set_id(i)
 
-            # TODO: delete former video clips
-
             if self.generate_window_a11y:
                 self.match_axtree()
             from platform import system
@@ -987,16 +900,6 @@ class Reducer:
             self.complete_dump(recording_path)
             self.vis_dump(recording_path)
 
-            with open(os.path.join(recording_path, "metadata.json"), "r") as f:
-                metadata = json.load(f)
-            video_start_time = metadata["video_start_timestamp"]
-            video_attrs = {"video_start_time": video_start_time}
-            time.sleep(1)
-            self.process_actions_multithreaded(
-                recording_path=recording_path,
-                video_attrs=video_attrs,
-                window_attrs=self.window_attrs,
-            )
             reduction_time = time.perf_counter() - start_time
 
             logger.info(
@@ -1009,38 +912,3 @@ class Reducer:
         except Exception as e:
             logger.exception(f"reduce_pipeline failed: {str(e)}")
             raise
-
-
-def visualize_recording(
-    recording_name, generate_window_a11y=True, generate_element_a11y=True
-):
-    recording_path = os.path.join(get_recordings_dir(), recording_name)
-
-    with open(os.path.join(recording_path, "metadata.json"), "r") as f:
-        metadata = json.load(f)
-    width, height = metadata["screen_width"], metadata["screen_height"]
-
-    reducer = Reducer(
-        recording_path=recording_path,
-        window_attrs={"width": width, "height": height},
-        configs={
-            "generate_window_a11y": generate_window_a11y,
-            "generate_element_a11y": generate_element_a11y,
-        },
-    )
-
-    reducer.reduce_pipeline()
-
-
-if __name__ == "__main__":
-    import argparse
-
-    parser = argparse.ArgumentParser(description="Process recording name.")
-    parser.add_argument(
-        "--recording_name",
-        type=str,
-        help="The name of the recording to process",
-    )
-    args = parser.parse_args()
-
-    visualize_recording(recording_name=args.recording_name)

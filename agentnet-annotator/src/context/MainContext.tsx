@@ -169,9 +169,18 @@ export const MainProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 showSuccess("Recording processed and ready to review");
             }
         });
+        // The backend stops on its own when the disk is nearly full.
+        const offAutoStop = SocketService.Listen("recording_auto_stopped", (data: any) => {
+            setStatus({ recording: false, paused: false, elapsed_seconds: 0 });
+            ipc().sendMessage("stop-record-icon");
+            ipc().sendMessage("maximize-window");
+            showError(data?.message || "Recording stopped");
+            fetchTasks();
+        });
         return () => {
             offOs?.();
             offReduced();
+            offAutoStop();
         };
     }, [SocketService, fetchTasks, refreshStatus, showError, showSuccess]);
 

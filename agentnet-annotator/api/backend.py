@@ -68,6 +68,8 @@ class CudaiBackend:
         routes = [
             # System Endpoints
             ("/api/check_permissions", self.system_controller.check_permissions),
+            ("/api/permissions", self.system_controller.check_permissions),
+            ("/api/permissions/request", self.system_controller.request_permission, {"methods": ["POST"]}),
             ("/api/consent", self.system_controller.get_consent),
             ("/api/consent", self.system_controller.set_consent, {"methods": ["POST"]}),
             ("/api/recording/status", self.system_controller.recording_status),
@@ -79,9 +81,6 @@ class CudaiBackend:
             ("/api/recording/<recording_name>/review", self.recording_controller.get_review),
             ("/api/recording/<recording_name>/video.mp4", self.recording_controller.stream_video),
             ("/api/recording/<recording_name>/task", self.recording_controller.update_task, {"methods": ["POST"]}),
-            # Video Endpoints
-            ("/api/video/<recording_name>/<event_index>", self.recording_controller.get_video),
-            ("/api/fullvideo/<recording_name>", self.recording_controller.get_full_video_endpoint),
             # Recording Operations
             ("/api/recording/<recording_name>/confirm", self.recording_controller.confirm_recording, {"methods": ["POST"]}),
             ("/api/recording/<recording_name>/cut", self.recording_controller.annotate_task_endpoint, {"methods": ["POST"]}),

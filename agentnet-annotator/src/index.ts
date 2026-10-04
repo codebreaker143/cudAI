@@ -209,6 +209,19 @@ app.on("ready", () => {
     shell.showItemInFolder(resolved);
   });
 
+  // Permissions setup: open the matching System Settings pane.
+  ipcMain.on("open-system-settings", (_event, url: unknown) => {
+    if (typeof url === "string" && url.startsWith("x-apple.systempreferences:")) {
+      shell.openExternal(url);
+    }
+  });
+
+  // macOS applies newly granted permissions only after a restart.
+  ipcMain.on("relaunch-app", () => {
+    app.relaunch();
+    app.quit();
+  });
+
   // Used by the consent screen: the app cannot be used without consent.
   ipcMain.on("quit-app", () => {
     app.quit();

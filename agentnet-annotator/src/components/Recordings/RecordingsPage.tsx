@@ -19,7 +19,10 @@ export function RecordingStatusBadge({ recording }: { recording: RecordingSummar
             </Badge>
         );
     }
-    if (!recording.visualizable || recording.broken) {
+    if (recording.broken || !recording.visualizable) {
+        return <Badge tone="red">Video missing</Badge>;
+    }
+    if (recording.action_count === 0) {
         return <Badge tone="neutral">No actions</Badge>;
     }
     return <Badge tone="green">Ready</Badge>;
@@ -141,7 +144,7 @@ export default function RecordingsPage() {
                             </thead>
                             <tbody className="divide-y divide-zinc-100 bg-white dark:divide-zinc-800 dark:bg-zinc-900">
                                 {rows.map((r) => {
-                                    const openable = r.status !== "processing";
+                                    const openable = r.visualizable && r.status !== "processing";
                                     return (
                                         <tr
                                             key={r.name}

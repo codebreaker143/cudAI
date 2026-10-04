@@ -217,7 +217,7 @@ export default function Homepage() {
                                 {recent.map((r) => (
                                     <li key={r.name}>
                                         <button
-                                            disabled={r.status === "processing"}
+                                            disabled={!r.visualizable || r.status === "processing"}
                                             onClick={() => navigate(`/recordings/${r.name}`)}
                                             className="flex w-full items-center gap-3 px-5 py-3 text-left hover:bg-zinc-50 disabled:cursor-default disabled:hover:bg-transparent dark:hover:bg-zinc-800/50"
                                         >
