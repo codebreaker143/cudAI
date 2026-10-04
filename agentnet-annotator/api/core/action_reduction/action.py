@@ -38,7 +38,6 @@ class Action:
         self.pre_move = None
         if "pre_move" in event:
             self.pre_move = Move(event["pre_move"])
-        # TODO: each action should have action id and event start, end id
         self.event_start_idx = event["event_idx"]
         self.children: Optional[List[Action]] = None
         self.complete: bool = event["complete"]
@@ -49,7 +48,6 @@ class Action:
         self.transformed: bool = False
         self.description: str = None
         self.vis: bool = True
-        self.show_all_move: bool = False
         self.exception = False
         self.depth = 0
         self.base_ignore_attrs: list = [
@@ -57,14 +55,11 @@ class Action:
             "ignore_log_attr_names",
             "complete_dump_excluded_attrs",
             "key",
-            "show_all_move",
             "transformed",
             "excluded_attrs",
             "base_ignore_attrs",
             "pre_move",
             "children",
-            "action_start_video_buffer_time",
-            "action_end_video_buffer_time",
         ]
 
         self.complete_dump_excluded_attrs: list = self.base_ignore_attrs
@@ -77,9 +72,6 @@ class Action:
             "time_stamp",
             "depth"
         ]
-
-        self.action_start_video_buffer_time = 0.5
-        self.action_end_video_buffer_time = 0.2
         self.target = None
         self.axtree = None
         self.past_frame_target = None
@@ -107,12 +99,6 @@ class Action:
             return self.start_time
         else:
             return self.children[-1].get_end_time()
-
-    def set_pre_move(self, action):
-        if isinstance(action, dict):
-            self.pre_move = Move(action)
-        else:
-            self.pre_move = action
 
     def add_child(self, child_action):
         if not isinstance(child_action, Action):
@@ -220,9 +206,6 @@ class Type(Action):
             
         self.time_trace = [event["time_stamp"]]
         self.end_time = self.time_trace[-1] + 0.2
-        
-        self.action_start_video_buffer_time = 0.5
-        self.action_end_video_buffer_time = 0.2
 
     def append(self, event):
         if isinstance(event, dict):
@@ -259,8 +242,6 @@ class Click(Action):  # single, double, triple, drag
         ]
         if self.pressed == False:
             self.vis = False
-        self.action_start_video_buffer_time = 0.5
-        self.action_end_video_buffer_time = 0.1
 
     def _is_long_press(self):
         if self.children:
@@ -293,14 +274,14 @@ class Click(Action):  # single, double, triple, drag
         if self.children and len(self.children) == 1:
             child_action = self.children[0]
             if child_action.pre_move is not None:
-                if self.cal_distance(child_action) > 6:  # TODO: need time?
+                if self.cal_distance(child_action) > 6:  # pixels; duration is not considered
                     logger.debug(f"{self.action} is drag")
                     return True
         return False
 
     def transform(self):
         super().transform()
-        if self.pressed == False:  # TODO
+        if self.pressed == False:  # release half of a pair: no description
             self.description = ""
             return
 
@@ -338,14 +319,6 @@ class Click(Action):  # single, double, triple, drag
                     if child.description:
                         self.description += child.description + "\n"
 
-    def is_no_move_between_complete_click(self, click_action):
-        if click_action.pre_move is None:
-            return True
-        elif self.cal_distance(click_action) < 4:
-            return True
-        else:
-            return False
-
     def set_exception_end_event(self):
         self.complete = True
         duration = 0.5
@@ -362,12 +335,11 @@ class Click(Action):  # single, double, triple, drag
 
         self.add_child(exception_action)
 
-    def set_complete_event(self, event):  # TODO: no release coordinate
+    def set_complete_event(self, event):  # Note: the release coordinate is not kept
         self.end_time = event["time_stamp"]
         self.complete = True
         self.time_trace[-1]["end_time"] = event["time_stamp"]
 
-    # TODO: already done / use this function
     def append(self, event):
         self.click_type += 1
         self.coordinates.append({"x": event["x"], "y": event["y"]})
@@ -383,8 +355,6 @@ class Press(Action):  # type, press, long press
         self.key_name = event["name"]
         self.complete = event["complete"]
         self.pressed = self.key[-1]
-        self.action_start_video_buffer_time = 0.3
-        self.action_end_video_buffer_time = 0.2
 
     def set_complete_event(self, event: dict):
         self.end_time = event["time_stamp"]
@@ -409,7 +379,7 @@ class Press(Action):  # type, press, long press
             return
 
         super().transform()
-        if self.pressed == False:  # TODO
+        if self.pressed == False:  # release half of a pair: no description
             return
 
         if not self.children:
@@ -417,7 +387,7 @@ class Press(Action):  # type, press, long press
                 wrap_func_key(self.key_name))
             return
 
-        # TODO: sort by time, include child action
+        # Re-nest children whose time span lies inside the previous child.
         if len(self.children) > 1:
             for i in range(len(self.children) - 1, 0, -1):
                 if (
@@ -442,7 +412,7 @@ class Press(Action):  # type, press, long press
                 )
                 self.children[0].vis = False
 
-            elif self.children[0].action == "press":  # TODO: modify
+            elif self.children[0].action == "press":
                 self.description = (
                     f"⌨️ Press: {wrap_func_key(self.key_name)} + "
                     + self.children[0].description.lstrip("⌨️ Press: ")
@@ -481,9 +451,6 @@ class Scroll(Action):
         self.trace = event["trace"]
         self.time_trace = event["time_trace"]
 
-        self.action_start_video_buffer_time = 0.5
-        self.action_end_video_buffer_time = 0.2
-
     def extend(self, event):
         if event["action"] != self.action:
             raise ValueError(
@@ -511,23 +478,6 @@ class Scroll(Action):
             (-1, -1): "↘",
         }
         return direction2icon[(dx, dy)]
-
-    def _get_direction_text(self, dx, dy):
-        if dx:
-            dx /= abs(dx)
-        if dy:
-            dy /= abs(dy)
-        direction2text = {
-            (0, 1): "Up",
-            (0, -1): "Down",
-            (1, 0): "Left",
-            (-1, 0): "Right",
-            (1, 1): "Top Left",
-            (-1, 1): "Top Right",
-            (1, -1): "Bottom Left",
-            (-1, -1): "Bottom Right",
-        }
-        return direction2text[(dx, dy)]
 
     def transform(self):
         super().transform()

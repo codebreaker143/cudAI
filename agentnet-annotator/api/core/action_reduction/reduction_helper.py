@@ -7,7 +7,7 @@ MODIFIED_KEYS = {"alt", "alt_l", "alt_r", "alt_gr",'altleft', 'altright',
                  "cmd", "cmd_l", "cmd_r", 'command', 
                  'fn', 'windows', 'win', 'winleft', 'winright', 'super', 'meta'}
 
-# TODO
+# Non-character keys, rendered as $name$ in descriptions.
 FUNCTIONAL_KEYS = {
     'tab', 'space', 'enter', 'return', 'esc', 'escape', 'backspace','up', 'down', 'left', 'right', 
     'caps', 'capslock', 'num_lock', 'numlock', 'clear', 'convert',  'decimal', 'del', 'delete', 'divide',  'end',

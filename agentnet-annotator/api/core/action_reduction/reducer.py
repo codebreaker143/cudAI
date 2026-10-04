@@ -1,3 +1,18 @@
+"""
+Reduce raw input events (events.jsonl) into human-level actions.
+
+Pipeline (Reducer.reduce_pipeline):
+  preprocess  drop pause markers, the app's own hotkeys and input to cudAI
+  compress    pair presses/releases and attach pointer movement to them
+  reduce_all  build Click / Type / Press / Scroll actions, nesting keys
+              pressed while a modifier is held
+  transform   merge clicks into double/triple clicks and drags, and write a
+              readable description for each action
+  match_*     attach accessibility elements to clicks
+  dump        reduced_events_complete.jsonl (all fields) and
+              reduced_events_vis.jsonl (review UI)
+"""
+
 import os
 import shutil
 import time
@@ -29,19 +44,12 @@ class Reducer:
         self.event_buffer = []
         self.active_events = set()
         self.active_actions = {}
-        self.errors = []
-        self.remove_redundant_move = True
-        self.built_actions = []
-        self.last_reduced_buffer_idx = 0
         self.pre_move = None
         self.window_attrs = window_attrs
 
-        self.terminate_method = "click"
         self.generate_window_a11y = configs["generate_window_a11y"]
         self.generate_element_a11y = configs["generate_element_a11y"]
-        self.flatten = False
 
-        self.reduce_status = {}
 
     def compress(self, events: List[Dict]):
         """
@@ -94,6 +102,16 @@ class Reducer:
         else:
             raise ValueError("Event type {} is not supported.".format(event["action"]))
 
+    def _attach_pre_move(self, cur_event):
+        """
+        Hand the pending pointer movement to the event that ends it.
+        Note: if that event is never added to the buffer, the movement is lost.
+        """
+        if self.pre_move is not None:
+            self.pre_move["complete"] = True
+            cur_event["pre_move"] = self.pre_move
+            self.pre_move = None
+
     def _get_last_event_in_buffer(self):
         if len(self.event_buffer) == 0:
             return None
@@ -119,10 +137,7 @@ class Reducer:
         if (cur_event["dx"], cur_event["dy"]) == (0, 0):
             return
 
-        if self.pre_move is not None:  # TODO: sometimes, new event won't be added, neither the pre_move
-            self.pre_move["complete"] = True
-            cur_event["pre_move"] = self.pre_move
-            self.pre_move = None
+        self._attach_pre_move(cur_event)
 
         # new event is scroll, last event is not scroll
         if not is_last_event_same:
@@ -155,17 +170,11 @@ class Reducer:
             cur_event["matched"] = None
             if key not in self.active_events:
                 # if long press key: don't add pre-move to each press signal
-                if self.pre_move is not None:  # TODO: sometimes, new event won't be added, neither the pre_move
-                    self.pre_move["complete"] = True
-                    cur_event["pre_move"] = self.pre_move
-                    self.pre_move = None
+                self._attach_pre_move(cur_event)
                 self.active_events.add(key)
                 self.event_buffer.append(cur_event)
         else:
-            if self.pre_move is not None:  # TODO: sometimes, new event won't be added, neither the pre_move
-                self.pre_move["complete"] = True
-                cur_event["pre_move"] = self.pre_move
-                self.pre_move = None
+            self._attach_pre_move(cur_event)
 
             cur_event["action"] = "type"
             cur_event["complete"] = True
@@ -181,15 +190,12 @@ class Reducer:
             )
             return
 
-        if self.pre_move is not None:  # TODO: sometimes, new event won't be added, neither the pre_move
-            self.pre_move["complete"] = True
-            cur_event["pre_move"] = self.pre_move
-            self.pre_move = None
+        self._attach_pre_move(cur_event)
 
         cur_event["end_time"] = cur_event["time_stamp"]
         key = (cur_event["key"][0], not cur_event["key"][1])
         if cur_event["name"] not in MODIFIED_KEYS:
-            # TODO: handle not found or overlap
+            # Note: overlapping presses of the same key match the latest one.
             for i in range(len(self.event_buffer) - 1, -1, -1):
                 if self.event_buffer[i]["key"] == key and not self.event_buffer[i].get(
                     "end_time"
@@ -208,7 +214,7 @@ class Reducer:
             if key in self.active_events:
                 self.active_events.remove(key)
 
-            # TODO: handle not found or overlap
+            # Note: overlapping presses of the same key match the latest one.
             for i in range(len(self.event_buffer) - 1, -1, -1):
                 if (
                     self.event_buffer[i]["key"] == key
@@ -222,10 +228,7 @@ class Reducer:
             logger.debug("Start press key not found: {}".format(cur_event))
 
     def _add_click_event_to_buffer(self, cur_event):
-        if self.pre_move is not None:  # TODO: sometimes, new event won't be added, neither the pre_move
-            self.pre_move["complete"] = True
-            cur_event["pre_move"] = self.pre_move
-            self.pre_move = None
+        self._attach_pre_move(cur_event)
 
         if cur_event["pressed"]:
             cur_event["matched"] = None
@@ -244,7 +247,7 @@ class Reducer:
         key = (cur_event["key"][0], not cur_event["key"][1])
         for i in range(
             len(self.event_buffer) - 1, -1, -1
-        ):  # TODO: handle not found or overlap
+        ):  # latest unmatched press of the same button
             if (
                 self.event_buffer[i]["key"] == key
                 and not self.event_buffer[i]["matched"]
@@ -284,8 +287,6 @@ class Reducer:
                     self.reduced_actions.append(Type(event))
                 elif self.reduced_actions[-1].action == "type":
                     self.reduced_actions[-1].append(event)
-                    # logger.warning("{} Apend type {} {}".format(len(self.reduced_actions), idx, event))
-                    # logger.error(self.reduced_actions[-1].key_names)
                 elif (
                     self.reduced_actions[-1].action == "press"
                     and self.reduced_actions[-1].is_typing()
@@ -294,8 +295,6 @@ class Reducer:
                     self.reduced_actions[-1].transform()
                 else:
                     self.reduced_actions.append(Type(event))
-                    # logger.warning("{} Add type {} {}".format(len(self.reduced_actions), idx, event))
-                    # logger.error(self.reduced_actions[-1].key_names)
 
             elif event["action"] == "press":
 
@@ -348,7 +347,6 @@ class Reducer:
                             self.reduced_actions[start_key_idx].set_complete_event(
                                 event
                             )
-                            # TODO may not needed
                             key = (event["key"][0], not event["key"][1])
                             if key in self.active_actions:
                                 self.active_actions.pop(key)
@@ -439,9 +437,7 @@ class Reducer:
 
                     self.reduced_actions[start_key_idx].set_complete_event(event)
 
-                    for i in range(
-                        start_key_idx + 1, len(self.reduced_actions), 1
-                    ):  # TODO: 2 -> 1
+                    for i in range(start_key_idx + 1, len(self.reduced_actions)):
                         self.reduced_actions[start_key_idx].add_child(
                             self.reduced_actions[i]
                         )
@@ -506,8 +502,6 @@ class Reducer:
         return None
 
     def transform(self, save=False):
-        # for i in range(len(self.reduced_actions)):
-        #    logger.warning("{} {}".format(i, self.reduced_actions[i].action))
 
         self.complete_idx = 0
         logger.debug("transform {}".format(len(self.reduced_actions)))
@@ -524,7 +518,6 @@ class Reducer:
             temp_action = self.reduced_actions[self.complete_idx]
 
             if not temp_action.complete:
-                # TODO: may have corner case
                 if self.complete_idx < len(self.reduced_actions):
                     logger.debug("Reducer: transform: action {} is not complete.")
                     self.reduced_actions.pop(self.complete_idx)
@@ -584,7 +577,7 @@ class Reducer:
                 action.drag_trace = action.children[0].trace
                 action.drag_time_trace = action.children[0].time_trace
             else:
-                # TODO: only deal with depth = 1 drag
+                # Note: only drags nested one level deep are flattened
                 if action.children and len(action.children) > 0:
                     for child in action.children:
                         if child.action == "drag":
@@ -619,7 +612,8 @@ class Reducer:
                             action.description += f" + {all_click_children} Clicks"
 
         if self.complete_idx < len(self.reduced_actions):
-            # TODO: Exception case: last action is not complete
+            # The recording ended mid-action (e.g. a key still held): fold the
+            # trailing actions into the incomplete one.
             for i in range(self.complete_idx + 1, len(self.reduced_actions)):
                 self.reduced_actions[self.complete_idx].add_child(
                     self.reduced_actions[i]
@@ -627,10 +621,6 @@ class Reducer:
             del self.reduced_actions[self.complete_idx + 1 : len(self.reduced_actions)]
 
         logger.debug(f"finish {len(self.reduced_actions)}")
-
-    def _save_action(self, action):
-        action.complete_dump(recording_dir=self.recording_path)
-        action.vis_dump(recording_dir=self.recording_path)
 
     def complete_dump(self, dir):
         os.makedirs(dir, exist_ok=True)
@@ -640,10 +630,7 @@ class Reducer:
         for action in self.reduced_actions:
             attrs = action.complete_dump()
             data.append(attrs)
-        # for item in data:
-        #     if isinstance(item, WindowsElementDescriber):
         #         print(f"Found WindowsElementDescriber: {item}")
-        # logger.info(f"Data: {data}")
 
         write_encrypted_jsonl(file_path, data=data)
 
@@ -824,32 +811,6 @@ class Reducer:
             else:
                 action.axtree = None
 
-    def flatten_actions(self):
-        """
-        Change the self.reduced_actions into a list of actions (parent & child action) with depth
-        """
-
-        def _flatten_action(action, depth=None):
-            actions = []
-            if not action.vis:
-                return actions
-
-            children = action.children
-            action.children = None
-            action.depth = depth
-
-            actions.append(action)
-            if children and len(children) > 0:
-                for child in children:
-                    actions.extend(_flatten_action(child, depth=depth + 1))
-            return actions
-
-        actions = []
-        for action in self.reduced_actions:
-            actions.extend(_flatten_action(action, depth=0))
-
-        self.reduced_actions = actions
-
     def reduce_pipeline(self):
         try:
             start_time = time.perf_counter()
@@ -884,9 +845,6 @@ class Reducer:
             if os.path.exists(event_buffer_path):
                 os.remove(event_buffer_path)
             write_encrypted_jsonl(event_buffer_path, data=self.event_buffer)
-
-            if self.flatten:
-                self.flatten_actions()
 
             for i, action in enumerate(self.reduced_actions):
                 action.set_id(i)
