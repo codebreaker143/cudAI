@@ -41,24 +41,34 @@ Python 3.12, Node 22.
 
 ```bash
 python -m venv .venv && source .venv/bin/activate
-pip install -r requirements_macos.txt
-cd agentnet-annotator
+pip install -r recorder/api/requirements-dev.txt
+cd recorder
 scripts/build_ffmpeg_lgpl.sh   # LGPL FFmpeg for this Mac -> api/ffmpeg
-npm install
+npm ci
 npm start                      # Electron + Python backend
 CUDAI_DEVTOOLS=1 npm start     # same, with the Chromium inspector open
 ```
 
 Grant Screen Recording, Accessibility and Input Monitoring to the app (or to
-your terminal when running from source).
+your terminal when running from source); cudAI checks them before recording.
 
-Tests:
+### Tests
 
 ```bash
-cd agentnet-annotator/api
-pip install pytest
-python -m pytest tests
+cd recorder
+npm test                       # backend tests + frontend type-check
+
+cd api
+python -m pytest tests                              # backend only
+CUDAI_E2E=1 python -m pytest tests/test_e2e_recording.py   # records your screen
 ```
+
+CI (`.github/workflows/ci.yml`) runs lint, backend tests (with the LGPL FFmpeg
+build) and the frontend type-check on every push.
+
+`tests/test_reducer_golden.py` fingerprints the extracted actions for a
+synthetic recording. If you change how actions are extracted on purpose,
+inspect the new output and update the expected fingerprint.
 
 Set `CUDAI_DATA_DIR` to use a different data directory (tests do this
 automatically; legacy-folder migration is skipped when it is set).
@@ -69,7 +79,7 @@ Windows).
 ## Packaging
 
 ```bash
-cd agentnet-annotator
+cd recorder
 scripts/build_ffmpeg_lgpl.sh universal   # x86_64 + arm64 FFmpeg
 npm run build-flask                      # PyInstaller backend
 npm run make

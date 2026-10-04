@@ -178,10 +178,9 @@ test_folder/
 # legacy visualization
 nextjs-flask
 node_modules/
-package-lock.json
 
 tests
-!agentnet-annotator/api/tests/
+!recorder/api/tests/
 
 # ffmpeg
 ffmpeg
@@ -191,7 +190,6 @@ token.json
 runtime.log
 
 # cloud
-agentnet-annotator/api/cloud/secret_keys/*
 
 log.txt
 ffmpeg.exe

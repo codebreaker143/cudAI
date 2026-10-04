@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  backend:
+    name: Backend tests (macOS, Apple Silicon)
+    runs-on: macos-14
+    defaults:
+      run:
+        working-directory: recorder/api
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: recorder/api/requirements*.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Restore LGPL FFmpeg
+        id: ffmpeg-cache
+        uses: actions/cache@v4
+        with:
+          path: recorder/api/ffmpeg
+          key: ffmpeg-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('recorder/scripts/build_ffmpeg_lgpl.sh') }}
+
+      - name: Build LGPL FFmpeg
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        working-directory: recorder
+        run: scripts/build_ffmpeg_lgpl.sh
+
+      - name: Lint
+        run: python -m pyflakes backend.py build.py runtime-hook.py controllers services core tests
+
+      - name: Tests
+        env:
+          CUDAI_LOG_LEVEL: WARNING
+        run: python -m pytest tests -q
+
+  frontend:
+    name: Frontend type-check
+    runs-on: macos-14
+    defaults:
+      run:
+        working-directory: recorder
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: recorder/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type-check
+        run: npx tsc --noEmit -p .

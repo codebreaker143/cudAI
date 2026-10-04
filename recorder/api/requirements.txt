@@ -1,0 +1,37 @@
+# Runtime dependencies of the cudAI recorder backend (direct dependencies only).
+# Install: pip install -r requirements.txt
+
+# Local API for the desktop UI
+Flask==3.0.3
+Flask-Cors==4.0.1
+Flask-SocketIO==5.3.6
+python-socketio==5.11.3
+python-engineio==4.9.1
+simple-websocket==1.0.0
+gevent==24.2.1
+gevent-websocket==0.10.1
+loguru==0.7.2
+
+# Input capture (patched pynput: fixes macOS key events; pinned commit)
+pynput @ git+https://github.com/moses-palmer/pynput.git@25a43fddc5dab1ad8628fdf601760f1896af12f8
+
+# Screen and display info
+screeninfo==0.8.1
+mss==9.0.1
+numpy==2.1.0
+
+# macOS: permissions, active window, accessibility
+pyobjc-core==10.3.1; sys_platform == "darwin"
+pyobjc-framework-Cocoa==10.3.1; sys_platform == "darwin"
+pyobjc-framework-Quartz==10.3.1; sys_platform == "darwin"
+pyobjc-framework-ApplicationServices==10.3.1; sys_platform == "darwin"
+oa_atomacos==3.2.0; sys_platform == "darwin"
+
+# Windows: active window, accessibility, device info
+psutil==6.0.0; sys_platform == "win32"
+pywin32==306; sys_platform == "win32"
+uiautomation==2.0.20; sys_platform == "win32"
+pywinauto==0.6.8; sys_platform == "win32"
+comtypes==1.4.6; sys_platform == "win32"
+lxml==5.3.0; sys_platform == "win32"
+WMI==1.5.1; sys_platform == "win32"
