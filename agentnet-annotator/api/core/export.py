@@ -17,7 +17,7 @@ from collections import Counter
 from .action_reduction.preprocess import preprocess_events
 from .constants import SCHEMA_VERSION
 from .logger import logger
-from .utils import read_encrypted_json, read_encrypted_jsonl, write_jsonl
+from .utils import probe_video, read_encrypted_json, read_encrypted_jsonl, write_jsonl
 
 TIME_BASE = (
     "All time_stamp / *_timestamp fields are seconds of a monotonic clock "
@@ -94,21 +94,9 @@ def build_timeline(recording_path: str, metadata: dict) -> list:
 def _legacy_video_info(recording_path: str, metadata: dict) -> dict:
     """Recordings made before cudai.recording.v1 have no video block."""
     info = {"file": "video.mp4", "video_start_timestamp": metadata["video_start_timestamp"]}
-    try:
-        import cv2
-
-        cap = cv2.VideoCapture(os.path.join(recording_path, "video.mp4"))
-        fps = cap.get(cv2.CAP_PROP_FPS) or 0
-        frames = cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0
-        info.update(
-            fps=round(fps) or None,
-            width=int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)) or None,
-            height=int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) or None,
-            duration=frames / fps if fps else None,
-        )
-        cap.release()
-    except Exception:
-        logger.warning(f"export: could not probe legacy video in {recording_path}")
+    video_path = os.path.join(recording_path, "video.mp4")
+    if os.path.exists(video_path):
+        info.update(probe_video(video_path))
     return info
 
 

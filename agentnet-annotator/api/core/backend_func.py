@@ -9,7 +9,6 @@ from .utils import (
     RECORDING_DIR,
     cut_video,
     find_mp4,
-    get_latest_folder,
     read_encrypted_jsonl,
     write_encrypted_json,
     write_encrypted_jsonl,
@@ -221,28 +220,3 @@ def read_recording_status(recording_path):
     else:
         recording_status = None
     return recording_status
-
-
-def save_task():
-    try:
-        data = request.json
-        task = data.get("task_name", "")
-        description = data.get("description", "")
-        if not task:
-            logger.info("Error: task name is None.")
-            return jsonify({"error": "Task is required"}), 400
-
-        task_folder_path = get_latest_folder(RECORDING_DIR)
-
-        write_encrypted_json(
-            os.path.join(task_folder_path, "task_name.json"),
-            {"task_name": task, "description": description},
-        )
-        write_export(task_folder_path)
-        logger.info("Task name saved.")
-        return jsonify({"message": "Task saved successfully"}), 200
-
-    except Exception as e:
-        logger.info("Backend: save_task error.")
-        logger.info(e)
-        return jsonify({"error": str(e)}), 500

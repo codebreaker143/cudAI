@@ -8,16 +8,14 @@ from typing import Tuple, Dict, Any
 from core.backend_func import annotate_task
 from core.utils import RECORDING_DIR
 from services.recording_service import RecordingService
-from services.file_service import FileService
 from services.error_handler import ErrorHandler, handle_api_errors, Validator
 
 
 class RecordingController:
     """Controller for recording-related endpoints."""
 
-    def __init__(self, recording_service: RecordingService, file_service: FileService, socketio):
+    def __init__(self, recording_service: RecordingService, socketio):
         self.recording_service = recording_service
-        self.file_service = file_service
         self.socketio = socketio
 
     @handle_api_errors
@@ -25,14 +23,6 @@ class RecordingController:
         """Get list of user recordings."""
         recordings_data = self.recording_service.get_user_recordings()
         return ErrorHandler.create_success_response(recordings_data)
-
-    @handle_api_errors
-    def get_single_user_recording(self, recording_name: str) -> Tuple[Dict[str, Any], int]:
-        """Get details of a single user recording."""
-        Validator.validate_recording_name(recording_name)
-
-        status, data = self.recording_service.get_single_recording(recording_name)
-        return ErrorHandler.handle_service_response((status, data))
 
     @handle_api_errors
     def confirm_recording(self, recording_name: str) -> Tuple[Dict[str, Any], int]:

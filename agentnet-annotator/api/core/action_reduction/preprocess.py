@@ -24,8 +24,6 @@ MODIFIER_ALIASES = {
 APP_HOTKEYS = [
     ({"cmd", "alt"}, {"r", "t", "p"}),
     ({"ctrl", "alt"}, {"r", "t", "p"}),
-    ({"cmd", "shift"}, {"t"}),
-    ({"ctrl", "shift"}, {"t"}),
 ]
 
 # A click that focuses the recorder is logged before the window poll notices

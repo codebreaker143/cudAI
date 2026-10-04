@@ -5,7 +5,6 @@ import os
 import shutil
 import threading
 import time
-import pyautogui
 from queue import Queue
 from datetime import datetime
 from typing import Dict, Tuple
@@ -24,6 +23,7 @@ from core.utils import (
     check_recording_visualizable,
     check_recording_broken,
     lock_raw_files,
+    primary_screen_size,
 )
 from core.backend_func import read_recording_status
 from core.consent import has_current_consent
@@ -88,7 +88,7 @@ class RecordingService:
             logger.exception("RecordingService: recovery failed")
 
     def _make_reducer(self, recording_path: str) -> Reducer:
-        width, height = pyautogui.size()
+        width, height = primary_screen_size()
         a11y_path = os.path.join(recording_path, "a11y.jsonl")
         return Reducer(
             recording_path=recording_path,
@@ -136,7 +136,7 @@ class RecordingService:
             )
             recording_path = self.recorder_thread.recording_path
 
-            width, height = pyautogui.size()
+            width, height = primary_screen_size()
             self.reducer = Reducer(
                 recording_path=recording_path,
                 window_attrs={"width": width, "height": height},

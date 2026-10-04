@@ -2,7 +2,6 @@
 
 from flask import request
 from typing import Tuple, Dict, Any
-from core.backend_func import save_task
 from core.permissions import check_permissions, request_permission
 from core.consent import CONSENT_VERSION, get_consent, get_contributor_id, record_consent
 from core.constants import RECORDER_VERSION, SCHEMA_VERSION
@@ -76,13 +75,3 @@ class SystemController:
         return ErrorHandler.create_success_response(
             self.recording_service.get_status()
         )
-
-    @handle_api_errors
-    def save_task_endpoint(self) -> Tuple[Dict[str, Any], int]:
-        """Save task data."""
-        try:
-            return save_task()
-        except Exception as e:
-            return ErrorHandler.create_error_response(
-                f"Failed to save task: {str(e)}"
-            )

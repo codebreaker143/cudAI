@@ -110,7 +110,7 @@ const checkFlaskServer = async (): Promise<void> => {
   try {
     await axios.get("http://localhost:5328/api/recordings");
     if (process.platform === "darwin") {
-      await axios.get("http://localhost:5328/api/check_permissions");
+      await axios.get("http://localhost:5328/api/permissions");
     }
     createWindow();
   } catch (error) {
@@ -176,11 +176,6 @@ app.on("ready", () => {
 
   globalShortcut.register("CommandOrControl+Alt+P", () => {
     mainWindow?.webContents.send("toggle-pause-record");
-  });
-
-  // TODO: Add global shortcuts for AXTree: CommandOrControl+Shift+T
-  globalShortcut.register("CommandOrControl+Shift+T", () => {
-    mainWindow?.webContents.send("get-axtree");
   });
 
   ipcMain.on("minimize-window", () => {

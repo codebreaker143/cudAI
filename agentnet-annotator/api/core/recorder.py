@@ -4,9 +4,9 @@ import time
 import uuid
 from platform import system
 from queue import Empty, Queue
+from threading import Thread
 
 from pynput import keyboard, mouse
-from PyQt6.QtCore import QThread
 
 from .metadata import MetadataManager
 from .xrec_capture import XrecCapture
@@ -31,7 +31,7 @@ _STOP = object()
 SHORTCUT_MODIFIERS = {"ctrl", "alt", "cmd"}
 
 
-class Recorder(QThread):
+class Recorder(Thread):
     """
     Records one session: screen video, input events, active window and a11y
     data. All timestamps are time.perf_counter() seconds (see metadata.clock).
@@ -46,7 +46,7 @@ class Recorder(QThread):
         generate_window_a11y: bool = False,
         generate_element_a11y: bool = True,
     ):
-        super().__init__()
+        super().__init__(daemon=True)
 
         if system() == "Windows":
             fix_windows_dpi_scaling()
@@ -55,8 +55,6 @@ class Recorder(QThread):
         self._is_recording = False
         self._is_paused = False
         self._held_modifiers = set()
-        self.gen_window = generate_window_a11y
-        self.gen_element = generate_element_a11y
         self.use_a11y = system() != "Linux"
         logger.info(
             f"Gen Window: {generate_window_a11y}, Gen Element: {generate_element_a11y}"
@@ -289,7 +287,7 @@ class Recorder(QThread):
         # Let in-flight element lookups (spawned per click) land.
         time.sleep(0.3)
         self.event_queue.put(_STOP)
-        self.wait()
+        self.join()
 
         for fp in self._files():
             fp.close()
@@ -306,6 +304,8 @@ class Recorder(QThread):
         self._is_paused = True
         if self.a11y_listener:
             self.a11y_listener.paused = True
+        if self.keyframe_detector:
+            self.keyframe_detector.paused = True
         now = time.perf_counter()
         # Written directly: _put() drops events while paused.
         self.event_queue.put({"time_stamp": now, "action": "pause"}, block=False)
@@ -322,6 +322,8 @@ class Recorder(QThread):
         self.event_queue.put({"time_stamp": now, "action": "resume"}, block=False)
         if self.a11y_listener:
             self.a11y_listener.paused = False
+        if self.keyframe_detector:
+            self.keyframe_detector.paused = False
         self._is_paused = False
         return True
 

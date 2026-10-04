@@ -169,6 +169,10 @@ export const MainProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 showSuccess("Recording processed and ready to review");
             }
         });
+        // Tray hint while a full accessibility snapshot is taken.
+        const offAxtree = SocketService.Listen("axtree", (data: any) => {
+            ipc().sendMessage(data?.status === "start" ? "tree-start" : "tree-end");
+        });
         // The backend stops on its own when the disk is nearly full.
         const offAutoStop = SocketService.Listen("recording_auto_stopped", (data: any) => {
             setStatus({ recording: false, paused: false, elapsed_seconds: 0 });
@@ -181,6 +185,7 @@ export const MainProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             offOs?.();
             offReduced();
             offAutoStop();
+            offAxtree();
         };
     }, [SocketService, fetchTasks, refreshStatus, showError, showSuccess]);
 

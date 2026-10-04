@@ -196,16 +196,13 @@ def check_recording_broken(recording_name: str) -> bool:
     ) and not os.path.exists(os.path.join(recording_path, "video.mp4"))
 
 
-def get_latest_folder(parent_directory):
-    subdirectories = [
-        os.path.join(parent_directory, d)
-        for d in os.listdir(parent_directory)
-        if os.path.isdir(os.path.join(parent_directory, d))
-    ]
-    if not subdirectories:
-        return None
-    latest_subdirectory = max(subdirectories, key=os.path.getctime)
-    return latest_subdirectory
+def primary_screen_size() -> tuple:
+    """Logical size (points on macOS) of the primary display."""
+    from screeninfo import get_monitors
+
+    monitors = get_monitors()
+    primary = next((m for m in monitors if m.is_primary), monitors[0])
+    return primary.width, primary.height
 
 
 def find_mp4(folder_path):
@@ -271,6 +268,23 @@ def run_ffmpeg(args: List[str], **kwargs) -> subprocess.CompletedProcess:
         text=True,
         **kwargs,
     )
+
+
+def probe_video(path: str) -> dict:
+    """Duration (s), width, height and fps of a video, read from FFmpeg."""
+    import re
+
+    stderr = run_ffmpeg(["-hide_banner", "-i", path]).stderr
+    info = {}
+    duration = re.search(r"Duration: (\d+):(\d+):(\d+\.\d+)", stderr)
+    if duration:
+        h, m, sec = duration.groups()
+        info["duration"] = int(h) * 3600 + int(m) * 60 + float(sec)
+    stream = re.search(r"Video: .*?, (\d{2,5})x(\d{2,5}).*?, ([\d.]+) fps", stderr)
+    if stream:
+        info["width"], info["height"] = int(stream.group(1)), int(stream.group(2))
+        info["fps"] = round(float(stream.group(3)))
+    return info
 
 
 def cut_video(
@@ -346,14 +360,3 @@ def get_key_str(key):
         return str(key)
     except Exception:
         return f"<Unprintable key: {type(key).__name__}>"
-
-
-def send_notification(title, message):
-    if system() == "Darwin":
-        subprocess.run(
-            [
-                "osascript",
-                "-e",
-                f'display notification "{message}" with title "{title}"',
-            ]
-        )

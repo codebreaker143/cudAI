@@ -10,10 +10,8 @@ from core.logger import logger
 from core.utils import migrate_legacy_recordings
 from services.config_service import ConfigService
 from services.recording_service import RecordingService
-from services.file_service import FileService
 from controllers.recording_controller import RecordingController
 from controllers.websocket_controller import WebSocketController
-from controllers.browser_controller import BrowserController
 from controllers.system_controller import SystemController
 
 # For asyncio package, don't remove this line
@@ -53,31 +51,26 @@ class CudaiBackend:
     def _initialize_services(self):
         """Initialize all service instances."""
         self.recording_service = RecordingService(self.socketio)
-        self.file_service = FileService()
 
     def _initialize_controllers(self):
         """Initialize all controller instances."""
         self.recording_controller = RecordingController(
-            self.recording_service, self.file_service, self.socketio
+            self.recording_service, self.socketio
         )
         self.websocket_controller = WebSocketController(self.recording_service)
-        self.browser_controller = BrowserController(self.file_service)
         self.system_controller = SystemController(self.recording_service)
 
     def _setup_routes(self):
         routes = [
             # System Endpoints
-            ("/api/check_permissions", self.system_controller.check_permissions),
             ("/api/permissions", self.system_controller.check_permissions),
             ("/api/permissions/request", self.system_controller.request_permission, {"methods": ["POST"]}),
             ("/api/consent", self.system_controller.get_consent),
             ("/api/consent", self.system_controller.set_consent, {"methods": ["POST"]}),
             ("/api/recording/status", self.system_controller.recording_status),
             ("/api/system/info", self.system_controller.system_info),
-            ("/api/recording/save_task", self.system_controller.save_task_endpoint, {"methods": ["POST"]}),
             # Recording Endpoints
             ("/api/recordings", self.recording_controller.get_user_recordings_list),
-            ("/api/recording/<recording_name>", self.recording_controller.get_single_user_recording),
             ("/api/recording/<recording_name>/review", self.recording_controller.get_review),
             ("/api/recording/<recording_name>/video.mp4", self.recording_controller.stream_video),
             ("/api/recording/<recording_name>/task", self.recording_controller.update_task, {"methods": ["POST"]}),
@@ -85,9 +78,6 @@ class CudaiBackend:
             ("/api/recording/<recording_name>/confirm", self.recording_controller.confirm_recording, {"methods": ["POST"]}),
             ("/api/recording/<recording_name>/cut", self.recording_controller.annotate_task_endpoint, {"methods": ["POST"]}),
             # Local Operations
-            # Browser Integration
-            ("/api/browser/append_element", self.browser_controller.append_browser_element, {"methods": ["POST"]}),
-            ("/api/browser/append_html", self.browser_controller.append_browser_html, {"methods": ["POST"]}),
         ]
 
         for route_info in routes:
@@ -109,17 +99,6 @@ class CudaiBackend:
         self.socketio.run(
             self.app, debug=debug, host=host, port=port, allow_unsafe_werkzeug=True
         )
-
-    def update_file_service_recording_path(self):
-        """Update file service with current recording path."""
-        if (
-            hasattr(self.recording_service, "recorder_thread")
-            and self.recording_service.recorder_thread
-            and hasattr(self.recording_service.recorder_thread, "recording_path")
-        ):
-            self.file_service.set_active_recording(
-                self.recording_service.recorder_thread.recording_path
-            )
 
     def quit(self):
         """Gracefully shutdown the backend."""
