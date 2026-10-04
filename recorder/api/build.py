@@ -24,6 +24,12 @@ if system() == "Darwin":
         "--add-data=licenses:licenses",
         "--hidden-import", "engineio.async_drivers.gevent",
         "--hidden-import", "geventwebsocket",
+        # Installed for development/tests only; never needed at runtime.
+        "--exclude-module", "cv2",
+        "--exclude-module", "PIL",
+        "--exclude-module", "cryptography",
+        "--exclude-module", "PyQt6",
+        "--exclude-module", "pytest",
         "--runtime-hook", "runtime-hook.py",
         "--distpath", "./dist",
         "backend.py"
@@ -34,6 +40,12 @@ else:
         f"--add-data={ffmpeg}{';' if system() == 'Windows' else ':'}{backend_dir / 'ffmpeg'}",
         "--hidden-import", "engineio.async_drivers.gevent",
         "--hidden-import", "geventwebsocket",
+        # Installed for development/tests only; never needed at runtime.
+        "--exclude-module", "cv2",
+        "--exclude-module", "PIL",
+        "--exclude-module", "cryptography",
+        "--exclude-module", "PyQt6",
+        "--exclude-module", "pytest",
         "--runtime-hook", "runtime-hook.py",
         "--distpath", "./dist",
         "--collect-all", "comtypes",

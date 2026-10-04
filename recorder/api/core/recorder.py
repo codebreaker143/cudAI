@@ -68,7 +68,6 @@ class Recorder(Thread):
         self.element_file = (
             self._open_jsonl("element.jsonl") if generate_element_a11y else None
         )
-        self.html_file = self._open_jsonl("html.jsonl")
         self.top_window_file = self._open_jsonl("top_window.jsonl")
 
         self.metadata_manager = MetadataManager(
@@ -258,7 +257,6 @@ class Recorder(Thread):
                 self.events_file,
                 self.a11y_file,
                 self.element_file,
-                self.html_file,
                 self.top_window_file,
             )
             if fp is not None
