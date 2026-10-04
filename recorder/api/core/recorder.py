@@ -55,6 +55,7 @@ class Recorder(Thread):
         self._is_recording = False
         self._is_paused = False
         self._held_modifiers = set()
+        self._last_clock = None
         self.use_a11y = system() != "Linux"
         logger.info(
             f"Gen Window: {generate_window_a11y}, Gen Element: {generate_element_a11y}"
@@ -209,11 +210,30 @@ class Recorder(Thread):
 
             if time.perf_counter() - last_flush > self.FLUSH_INTERVAL:
                 self._flush()
+                self._check_clock()
                 last_flush = time.perf_counter()
 
         self._drain_aux_queues()
         self._flush()
         logger.info("Recorder: run done.")
+
+    CLOCK_DRIFT_TOLERANCE = 2.0  # seconds
+
+    def _check_clock(self):
+        """
+        perf_counter does not advance while the Mac sleeps but wall-clock time
+        does. When they diverge, record a new anchor so event times can still
+        be converted to real dates afterwards.
+        """
+        perf, unix = time.perf_counter(), time.time()
+        last = self._last_clock
+        self._last_clock = (perf, unix)
+        if last is None:
+            return
+        drift = (unix - last[1]) - (perf - last[0])
+        if drift > self.CLOCK_DRIFT_TOLERANCE:
+            logger.info(f"Recorder: system slept for ~{drift:.0f}s; new clock anchor")
+            self.metadata_manager.add_clock_anchor(perf, unix, drift)
 
     def start_recording(self):
         """Start capture and listeners, then the writer thread."""

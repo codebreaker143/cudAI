@@ -87,3 +87,15 @@ def get_active_app_info() -> dict | None:
     if impl is None:
         return None
     return impl.get_active_app_info()
+
+
+def enable_full_accessibility(pid: int) -> None:
+    """Make Chromium/Electron apps expose web content to accessibility (macOS)."""
+    if impl is not None and hasattr(impl, "enable_full_accessibility"):
+        impl.enable_full_accessibility(pid)
+
+
+def running_app_pids() -> list:
+    if impl is not None and hasattr(impl, "running_app_pids"):
+        return impl.running_app_pids()
+    return []

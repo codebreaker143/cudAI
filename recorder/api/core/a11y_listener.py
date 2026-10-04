@@ -1,12 +1,26 @@
 import os
+import re
 import time
 
 from pynput import mouse
 from queue import Queue
 from threading import Thread
 
-from .a11y import get_active_element_data, get_active_app_info
+from .a11y import (
+    enable_full_accessibility,
+    get_active_app_info,
+    get_active_element_data,
+    running_app_pids,
+)
 from .logger import logger
+
+
+# Invisible direction marks some apps put in their names ("\u200eWhatsApp").
+_INVISIBLE = re.compile("[\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]")
+
+
+def clean_text(value):
+    return _INVISIBLE.sub("", value).strip() if isinstance(value, str) else value
 
 
 def get_recorder_app_pid() -> int | None:
@@ -24,6 +38,7 @@ class A11yListener:
         self.running = False
         self.paused = False
         self.recorder_pid = get_recorder_app_pid()
+        self._accessibility_enabled = set()
 
         self.mouse_listener = mouse.Listener(on_click=self.on_click)
         self._top_window_queue = Queue()
@@ -57,6 +72,9 @@ class A11yListener:
 
                 info = get_active_app_info()
                 if info is not None:
+                    info["app_name"] = clean_text(info["app_name"])
+                    info["window_title"] = clean_text(info["window_title"])
+                    self._enable_accessibility(info["pid"])
                     key = (info["pid"], info["window_title"])
                     if key != last_key:
                         info["is_recorder"] = (
@@ -76,7 +94,19 @@ class A11yListener:
                 logger.exception("a11y_listener _get_top_window error.")
             time.sleep(self.POLL_INTERVAL)
 
+    def _enable_accessibility(self, pid: int) -> None:
+        if pid in self._accessibility_enabled or pid == self.recorder_pid:
+            return
+        self._accessibility_enabled.add(pid)
+        try:
+            enable_full_accessibility(pid)
+        except Exception:
+            logger.debug(f"a11y_listener: could not enable accessibility for pid {pid}")
+
     def start(self):
+        # Before the first click, so web content trees have time to build.
+        for pid in running_app_pids():
+            self._enable_accessibility(pid)
         self.running = True
         self.mouse_listener.start()
         self.top_window_getter.start()

@@ -169,6 +169,15 @@ export const MainProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 showSuccess("Recording processed and ready to review");
             }
         });
+        // The main process paused the recording because the Mac slept/locked.
+        const offAutoPause = ipc().on("recording-auto-paused", (reason: unknown) => {
+            setStatus((prev) => ({ ...prev, paused: true }));
+            showInfo(
+                reason === "lock"
+                    ? "Recording paused because the screen was locked. Resume when you're ready."
+                    : "Recording paused because your Mac went to sleep. Resume when you're ready."
+            );
+        });
         // Tray hint while a full accessibility snapshot is taken.
         const offAxtree = SocketService.Listen("axtree", (data: any) => {
             ipc().sendMessage(data?.status === "start" ? "tree-start" : "tree-end");
@@ -186,8 +195,9 @@ export const MainProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             offReduced();
             offAutoStop();
             offAxtree();
+            offAutoPause();
         };
-    }, [SocketService, fetchTasks, refreshStatus, showError, showSuccess]);
+    }, [SocketService, fetchTasks, refreshStatus, showError, showInfo, showSuccess]);
 
     // Global shortcuts from the main process.
     useEffect(() => {

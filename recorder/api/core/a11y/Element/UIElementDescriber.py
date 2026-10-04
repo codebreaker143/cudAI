@@ -1,5 +1,18 @@
 import abc
+import ast
 from abc import abstractmethod
+
+
+
+def safe_literal(text: str):
+    """
+    Parse a Python literal (dict, list, number...) without executing code.
+    Accessibility values come from other apps and must never be evaluated.
+    """
+    try:
+        return ast.literal_eval(text)
+    except (ValueError, SyntaxError, TypeError, MemoryError, RecursionError):
+        return None
 
 
 class UIElementDescriber(abc.ABC):
@@ -25,8 +38,10 @@ class UIElementDescriber(abc.ABC):
         self.title = json.get("title", None)
         self.description = json.get("description", None)
         self.rect = json.get("rect", None)
-        if (isinstance(self.rect, str)):
-            self.rect = eval(self.rect)
+        if isinstance(self.rect, str):
+            self.rect = safe_literal(self.rect)
+            if not isinstance(self.rect, dict):
+                self.rect = None
         if self.rect and "left" in self.rect:  # Windows
             self.rect['x'] = self.rect['left']
             self.rect['y'] = self.rect['top']

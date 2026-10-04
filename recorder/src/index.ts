@@ -13,6 +13,7 @@ import {
   Tray,
   systemPreferences,
   nativeTheme,
+  powerMonitor,
 } from "electron";
 import { spawn, ChildProcess, execSync } from "child_process";
 import axios from "axios";
@@ -214,6 +215,27 @@ app.on("ready", () => {
     if (process.platform === "darwin" && !resolved.startsWith(dataDir)) return;
     shell.showItemInFolder(resolved);
   });
+
+  // Pause before the Mac sleeps or the screen locks: nothing should be
+  // captured while the user is away (or of the lock screen). The renderer is
+  // often minimized and throttled while recording, so pause from here.
+  const pauseForSystem = async (reason: "sleep" | "lock") => {
+    try {
+      const { data } = await axios.post(
+        "http://127.0.0.1:5328/api/recording/pause",
+        {},
+        { headers: API_HEADERS, timeout: 20000 }
+      );
+      if (data.paused) {
+        PauseRecording();
+        mainWindow?.webContents.send("recording-auto-paused", reason);
+      }
+    } catch (error) {
+      log.warn(`Auto-pause on ${reason} failed: ${error}`);
+    }
+  };
+  powerMonitor.on("suspend", () => pauseForSystem("sleep"));
+  powerMonitor.on("lock-screen", () => pauseForSystem("lock"));
 
   // Permissions setup: open the matching System Settings pane.
   ipcMain.on("open-system-settings", (_event, url: unknown) => {

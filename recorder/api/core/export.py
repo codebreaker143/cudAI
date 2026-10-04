@@ -23,7 +23,9 @@ TIME_BASE = (
     "All time_stamp / *_timestamp fields are seconds of a monotonic clock "
     "(Python time.perf_counter). video_time = t - video.video_start_timestamp; "
     "frame = floor(video_time * video.fps); "
-    "unix_time = clock.unix_time + (t - clock.perf_counter). "
+    "unix_time = anchor.unix_time + (t - anchor.perf_counter), using the last "
+    "of [clock] + clock_anchors with anchor.perf_counter <= t (the monotonic "
+    "clock stops while the computer sleeps; see system_sleeps). "
     "Input coordinates are logical display points; multiply by "
     "display.scale_factor to get video pixels."
 )
@@ -35,18 +37,34 @@ def _read_jsonl(path: str) -> list:
     return read_encrypted_jsonl(path) if os.path.exists(path) else []
 
 
-def _timeline_entry(event: dict, video_start: float, fps: int, clock: dict | None) -> dict:
+def clock_anchors(metadata: dict) -> list:
+    anchors = [metadata["clock"]] if metadata.get("clock") else []
+    anchors += metadata.get("clock_anchors") or []
+    return sorted(anchors, key=lambda a: a["perf_counter"])
+
+
+def to_unix(t: float, anchors: list) -> float | None:
+    """Wall-clock time of a perf_counter timestamp, robust to system sleep."""
+    if not anchors:
+        return None
+    anchor = anchors[0]
+    for candidate in anchors:
+        if candidate["perf_counter"] <= t:
+            anchor = candidate
+        else:
+            break
+    return anchor["unix_time"] + (t - anchor["perf_counter"])
+
+
+def _timeline_entry(event: dict, video_start: float, fps: int, anchors: list) -> dict:
     t = event["time_stamp"]
     t_video = t - video_start
+    unix = to_unix(t, anchors)
     entry = {
         "t": t,
         "t_video": round(t_video, 4),
         "frame": int(t_video * fps) if t_video >= 0 else None,
-        "t_unix": (
-            round(clock["unix_time"] + (t - clock["perf_counter"]), 4)
-            if clock
-            else None
-        ),
+        "t_unix": round(unix, 4) if unix is not None else None,
         "type": event["action"],
     }
     if event["action"] in ("move", "click", "scroll"):
@@ -67,16 +85,16 @@ def build_timeline(recording_path: str, metadata: dict) -> list:
     windows = _read_jsonl(os.path.join(recording_path, "top_window.jsonl"))
     video_start = metadata["video_start_timestamp"]
     fps = (metadata.get("video") or {}).get("fps", 30)
-    clock = metadata.get("clock")
+    anchors = clock_anchors(metadata)
 
     timeline = [
-        _timeline_entry(e, video_start, fps, clock)
+        _timeline_entry(e, video_start, fps, anchors)
         for e in preprocess_events(events, windows)
     ]
     for window in windows:
         entry = _timeline_entry(
             {"time_stamp": window["time_stamp"], "action": "window"},
-            video_start, fps, clock,
+            video_start, fps, anchors,
         )
         for field in ("app_name", "bundle_id", "pid", "window_title",
                       "window_bounds", "is_recorder"):
@@ -158,6 +176,8 @@ def write_export(recording_path: str) -> dict | None:
             },
             "video": metadata.get("video") or _legacy_video_info(recording_path, metadata),
             "clock": metadata.get("clock"),
+            "clock_anchors": metadata.get("clock_anchors", []),
+            "system_sleeps": metadata.get("system_sleeps", []),
             "pauses": metadata.get("pauses", []),
             "time_base": TIME_BASE,
             "files": {

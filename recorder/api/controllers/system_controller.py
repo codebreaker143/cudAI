@@ -71,6 +71,14 @@ class SystemController:
         )
 
     @handle_api_errors
+    def pause_recording(self) -> Tuple[Dict[str, Any], int]:
+        """Pause from the desktop app (e.g. the Mac is going to sleep)."""
+        status, message = self.recording_service.pause_recording()
+        return ErrorHandler.create_success_response(
+            {"paused": status == "succeed", "detail": message}
+        )
+
+    @handle_api_errors
     def recording_status(self) -> Tuple[Dict[str, Any], int]:
         return ErrorHandler.create_success_response(
             self.recording_service.get_status()

@@ -146,6 +146,10 @@ class MetadataManager:
                 "scale_factor": None,
             },
             "pauses": [],
+            # Extra (perf_counter, unix_time) pairs taken after the clocks
+            # diverged, i.e. after the Mac slept (perf_counter stops then).
+            "clock_anchors": [],
+            "system_sleeps": [],
         }
 
     def collect(self):
@@ -158,6 +162,12 @@ class MetadataManager:
 
     def end_collect(self):
         self.metadata["stop_time"] = datetime.now().astimezone().isoformat()
+
+    def add_clock_anchor(self, perf: float, unix: float, slept_seconds: float):
+        self.metadata["clock_anchors"].append({"perf_counter": perf, "unix_time": unix})
+        self.metadata["system_sleeps"].append(
+            {"resumed_at": perf, "slept_seconds": round(slept_seconds, 1)}
+        )
 
     def add_pause(self, start: float, end: float | None = None):
         self.metadata["pauses"].append({"start_timestamp": start, "end_timestamp": end})

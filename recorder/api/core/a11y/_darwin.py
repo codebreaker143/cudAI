@@ -71,6 +71,27 @@ def get_top_window_name() -> str:
         return "Desktop"
 
 
+def enable_full_accessibility(pid: int) -> None:
+    """
+    Ask Chromium-based apps (Chrome, Edge, Electron apps such as VS Code,
+    Slack, Teams) to expose their full accessibility tree. They only do so
+    when they believe assistive technology is running; without this, clicks
+    inside web content resolve to a generic "scroll area". Other apps ignore
+    the attribute. The tree is built asynchronously after enabling.
+    """
+    app = ApplicationServices.AXUIElementCreateApplication(pid)
+    ApplicationServices.AXUIElementSetAttributeValue(app, "AXManualAccessibility", True)
+
+
+def running_app_pids() -> list:
+    workspace = AppKit.NSWorkspace.sharedWorkspace()
+    return [
+        int(app.processIdentifier())
+        for app in workspace.runningApplications()
+        if app.activationPolicy() == AppKit.NSApplicationActivationPolicyRegular
+    ]
+
+
 def get_active_app_info() -> dict | None:
     """
     Frontmost application and its focused window.

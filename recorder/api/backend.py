@@ -73,6 +73,7 @@ class CudaiBackend:
             ("/api/consent", self.system_controller.get_consent),
             ("/api/consent", self.system_controller.set_consent, {"methods": ["POST"]}),
             ("/api/recording/status", self.system_controller.recording_status),
+            ("/api/recording/pause", self.system_controller.pause_recording, {"methods": ["POST"]}),
             ("/api/system/info", self.system_controller.system_info),
             # Recording Endpoints
             ("/api/recordings", self.recording_controller.get_user_recordings_list),

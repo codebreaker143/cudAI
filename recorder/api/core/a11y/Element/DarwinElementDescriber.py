@@ -3,7 +3,7 @@ import statistics
 
 from numpy import mean
 
-from .UIElementDescriber import UIElementDescriber
+from .UIElementDescriber import UIElementDescriber, safe_literal
 
 MAX_AREA = 1920 * 1020 / 2  # 最大面积
 MIN_AREA = 1000       # 最小面积
@@ -22,7 +22,7 @@ class DarwinElementDescriber(UIElementDescriber):
         self.enabled = None
         self.index = None
         self.attrs = None
-        self.similarity_cache = {}  # 添加一个用于存储比较结果的字典
+        self.similarity_cache = {}  # memoized comparison results
         self.x = x
         self.y = y
         self.semantic_attrs = []
@@ -32,9 +32,9 @@ class DarwinElementDescriber(UIElementDescriber):
         return {k: getattr(self, k) for k in self.semantic_attrs} if self.semantic_attrs != [] else {}
 
     def build_from_json(self, data, rule="bounding"):
-        if (isinstance(data, str)):
-            data = eval(data)
-            if (not isinstance(data, dict)):
+        if isinstance(data, str):
+            data = safe_literal(data)
+            if not isinstance(data, dict):
                 return self
         if data.get("AXFocusableAncestor", data.get("AXHighestEditableAncestor", None)) != None:
             new_node = DarwinElementDescriber(self.x, self.y)
@@ -119,7 +119,9 @@ class DarwinElementDescriber(UIElementDescriber):
                     else:
                         child_frame = child_json.get("AXFrame", None)
                         if isinstance(child_frame, str):
-                            child_frame = eval(child_frame)
+                            child_frame = safe_literal(child_frame)
+                            if not isinstance(child_frame, dict):
+                                continue
                         nearesr_ancestor_rect = self.get_nearest_ancestor_rect()
                         if child_frame.get("x", None) == None:
                             child_frame.update(
