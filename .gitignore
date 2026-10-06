@@ -181,6 +181,8 @@ node_modules/
 
 tests
 !recorder/api/tests/
+# Python template ignores lib/; the UI keeps source code in src/lib.
+!recorder/src/lib/
 
 # ffmpeg
 ffmpeg
