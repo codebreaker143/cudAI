@@ -12,10 +12,12 @@ Raw files (events.jsonl, top_window.jsonl, ...) are left untouched.
 
 import json
 import os
+from urllib.parse import urlsplit
 from collections import Counter
 
 from .action_reduction.preprocess import preprocess_events
 from .constants import SCHEMA_VERSION
+from .displays import display_at
 from .logger import logger
 from .utils import probe_video, read_encrypted_json, read_encrypted_jsonl, write_jsonl
 
@@ -26,8 +28,11 @@ TIME_BASE = (
     "unix_time = anchor.unix_time + (t - anchor.perf_counter), using the last "
     "of [clock] + clock_anchors with anchor.perf_counter <= t (the monotonic "
     "clock stops while the computer sleeps; see system_sleeps). "
-    "Input coordinates are logical display points; multiply by "
-    "display.scale_factor to get video pixels."
+    "Input coordinates are global logical points (origin: top-left of the "
+    "main display). Each pointer event's `display` is the index into "
+    "`displays`; subtract that display's bounds.x/y and multiply by its "
+    "scale_factor for pixels in its video (video.mp4 for display 0, "
+    "video_display_N.mp4 otherwise)."
 )
 
 KEYBOARD_FIELDS = ("name", "char", "text", "modifiers", "vk")
@@ -56,7 +61,7 @@ def to_unix(t: float, anchors: list) -> float | None:
     return anchor["unix_time"] + (t - anchor["perf_counter"])
 
 
-def _timeline_entry(event: dict, video_start: float, fps: int, anchors: list) -> dict:
+def _timeline_entry(event: dict, video_start: float, fps: int, anchors: list, displays: list = ()) -> dict:
     t = event["time_stamp"]
     t_video = t - video_start
     unix = to_unix(t, anchors)
@@ -69,6 +74,8 @@ def _timeline_entry(event: dict, video_start: float, fps: int, anchors: list) ->
     }
     if event["action"] in ("move", "click", "scroll"):
         entry["x"], entry["y"] = event["x"], event["y"]
+        if displays:
+            entry["display"] = display_at(displays, event["x"], event["y"])
     if event["action"] == "click":
         entry["button"], entry["pressed"] = event["button"], event["pressed"]
     if event["action"] == "scroll":
@@ -86,9 +93,10 @@ def build_timeline(recording_path: str, metadata: dict) -> list:
     video_start = metadata["video_start_timestamp"]
     fps = (metadata.get("video") or {}).get("fps", 30)
     anchors = clock_anchors(metadata)
+    displays = metadata.get("displays") or []
 
     timeline = [
-        _timeline_entry(e, video_start, fps, anchors)
+        _timeline_entry(e, video_start, fps, anchors, displays)
         for e in preprocess_events(events, windows)
     ]
     for window in windows:
@@ -97,7 +105,7 @@ def build_timeline(recording_path: str, metadata: dict) -> list:
             video_start, fps, anchors,
         )
         for field in ("app_name", "bundle_id", "pid", "window_title",
-                      "window_bounds", "is_recorder"):
+                      "window_bounds", "url", "is_recorder"):
             if field in window:
                 entry[field] = window[field]
         entry.setdefault("app_name", window.get("top_window_name"))
@@ -136,11 +144,14 @@ def write_export(recording_path: str) -> dict | None:
         actions = _read_jsonl(os.path.join(recording_path, "reduced_events_complete.jsonl"))
 
         counts = Counter(e["type"] for e in timeline)
-        apps = []
+        apps, sites = [], []
         for e in timeline:
             if e["type"] == "window" and not e.get("is_recorder"):
                 if e.get("app_name") and e["app_name"] not in apps:
                     apps.append(e["app_name"])
+                host = urlsplit(e["url"]).netloc if e.get("url") else None
+                if host and host not in sites:
+                    sites.append(host)
 
         manifest = {
             "schema_version": metadata.get("schema_version", SCHEMA_VERSION),
@@ -175,6 +186,7 @@ def write_export(recording_path: str) -> dict | None:
                 "scale_factor": None,
             },
             "video": metadata.get("video") or _legacy_video_info(recording_path, metadata),
+            "displays": metadata.get("displays") or [],
             "clock": metadata.get("clock"),
             "clock_anchors": metadata.get("clock_anchors", []),
             "system_sleeps": metadata.get("system_sleeps", []),
@@ -193,6 +205,7 @@ def write_export(recording_path: str) -> dict | None:
                 "event_counts": dict(counts),
                 "action_count": len(actions),
                 "apps": apps,
+                "sites": sites,
             },
         }
         with open(os.path.join(recording_path, "manifest.json"), "w", encoding="utf-8") as f:

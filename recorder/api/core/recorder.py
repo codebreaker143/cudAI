@@ -9,7 +9,8 @@ from threading import Thread
 from pynput import keyboard, mouse
 
 from .metadata import MetadataManager
-from .xrec_capture import XrecCapture
+from .displays import list_displays
+from .xrec_capture import MultiCapture
 from .constants import MODIFIER_KEY_NAMES
 from .utils import (
     fix_windows_dpi_scaling,
@@ -76,7 +77,9 @@ class Recorder(Thread):
             recording_id=self.recording_id,
             natural_scrolling=natural_scrolling,
         )
-        self.capture_client = XrecCapture(recording_path=self.recording_path)
+        self.displays = list_displays()
+        self.metadata_manager.set_displays(self.displays)
+        self.capture_client = MultiCapture(self.recording_path, self.displays)
 
         self.mouse_listener = mouse.Listener(
             on_move=self.on_move, on_click=self.on_click, on_scroll=self.on_scroll
@@ -311,7 +314,9 @@ class Recorder(Thread):
             fp.close()
 
         try:
-            self.metadata_manager.set_video(self.capture_client.finalize())
+            videos = self.capture_client.finalize()
+            self.metadata_manager.set_video(videos[0])
+            self.metadata_manager.set_display_videos(videos)
         finally:
             self.metadata_manager.save_metadata()
         logger.info("Recorder: stop_recording done.")

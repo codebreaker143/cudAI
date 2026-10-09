@@ -5,6 +5,7 @@ import signal
 import subprocess
 import time
 
+from .displays import segments_dir_name, video_file_name
 from .logger import logger
 from .utils import VIDEO_FPS, get_ffmpeg_path, h264_encoder_args, run_ffmpeg
 
@@ -13,6 +14,8 @@ from .utils import VIDEO_FPS, get_ffmpeg_path, h264_encoder_args, run_ffmpeg
 # recording the screen with no UI showing it. This guardian runs FFmpeg and
 # stops it (gracefully, so the file stays playable) as soon as the backend
 # process is gone. Our own "q" on stdin still reaches FFmpeg for normal stops.
+# A capture that hangs (e.g. while macOS initializes the screen stream) may
+# ignore SIGINT, so after a grace period the guardian force-kills it.
 WATCHDOG = r"""
 owner=$1; shift
 "$@" <&0 &
@@ -22,7 +25,11 @@ while kill -0 "$owner" 2>/dev/null && kill -0 "$ffmpeg_pid" 2>/dev/null; do
   sleep 0.5
 done
 kill -INT "$ffmpeg_pid" 2>/dev/null
-wait "$ffmpeg_pid"
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  kill -0 "$ffmpeg_pid" 2>/dev/null || exit 0
+  sleep 0.5
+done
+kill -KILL "$ffmpeg_pid" 2>/dev/null
 """
 
 START_RE = re.compile(r"start: (\d+\.\d+)")
@@ -46,30 +53,43 @@ class XrecCapture:
 
     START_TIMEOUT = 15.0
 
-    def __init__(self, recording_path: str, fps: int = VIDEO_FPS):
+    def __init__(
+        self,
+        recording_path: str,
+        fps: int = VIDEO_FPS,
+        display_index: int = 0,
+        screen_device: str | None = None,
+    ):
         self.recording_path = recording_path
-        self.segments_dir = os.path.join(recording_path, "segments")
+        self.display_index = display_index
+        self.segments_dir = os.path.join(recording_path, segments_dir_name(display_index))
+        self.output_name = video_file_name(display_index)
         self.fps = fps
+        self.screen_device = screen_device
         self.process = None
         self.log_file = None
+        self._pending = None
         self.segments = []
 
     def _find_screen_device(self) -> str:
-        result = run_ffmpeg(["-f", "avfoundation", "-list_devices", "true", "-i", ""])
-        output = result.stderr
-
-        match = re.search(r"\[(\d+)\]\s+Capture screen 0", output) or re.search(
-            r"\[(\d+)\]\s+Capture screen", output
-        )
-        if not match:
-            raise RuntimeError("cudAI could not find a screen capture device.")
-        return match.group(1)
+        if self.screen_device is None:
+            self.screen_device = find_screen_devices().get(self.display_index)
+        if self.screen_device is None:
+            raise RuntimeError(
+                f"cudAI could not find a capture device for display {self.display_index}."
+            )
+        return self.screen_device
 
     @property
     def is_capturing(self) -> bool:
         return self.process is not None and self.process.poll() is None
 
     def start_segment(self) -> dict:
+        self.launch_segment()
+        return self.await_segment_start()
+
+    def launch_segment(self) -> None:
+        """Start FFmpeg for a new segment without waiting for its first frame."""
         if self.is_capturing:
             raise RuntimeError("Recording is already running.")
 
@@ -105,17 +125,19 @@ class XrecCapture:
             stdin=subprocess.PIPE,
             stdout=subprocess.DEVNULL,
             stderr=self.log_file,
+            # Own process group, so the guardian and FFmpeg can be killed together.
+            start_new_session=os.name != "nt",
         )
+        self._pending = {"index": index, "file": video_path, "log": log_path}
 
-        start_ts = self._wait_for_start(log_path)
-        segment = {
-            "index": index,
-            "file": video_path,
-            "log": log_path,
-            "start_timestamp": start_ts,
-        }
+    def await_segment_start(self) -> dict:
+        segment = self._pending
+        segment["start_timestamp"] = self._wait_for_start(segment["log"])
         self.segments.append(segment)
-        logger.info(f"XrecCapture: segment {index} first frame at {start_ts}")
+        logger.info(
+            f"XrecCapture: display {self.display_index} segment {segment['index']} "
+            f"first frame at {segment['start_timestamp']}"
+        )
         return segment
 
     def _wait_for_start(self, log_path: str) -> float:
@@ -133,7 +155,7 @@ class XrecCapture:
                 return float(match.group(1))
             time.sleep(0.02)
 
-        self._terminate()
+        self.abort()
         raise RuntimeError(
             f"Screen capture did not report a start time. See {log_path}"
         )
@@ -208,11 +230,29 @@ class XrecCapture:
             self.segments.append(segment)
 
     def _terminate(self):
+        """Stop FFmpeg (and its guardian): politely, then by force."""
+        process = self.process
         try:
-            self.process.send_signal(signal.SIGINT)
-            self.process.wait(timeout=5)
+            process.send_signal(signal.SIGINT)
+            process.wait(timeout=5)
         except Exception:
-            self.process.kill()
+            pass
+        if os.name != "nt":
+            try:
+                os.killpg(process.pid, signal.SIGKILL)  # whole group, incl. FFmpeg
+            except (ProcessLookupError, PermissionError):
+                pass
+        if process.poll() is None:
+            process.kill()
+            process.wait(timeout=5)
+
+    def abort(self) -> None:
+        """Discard a segment that failed to start (or never will)."""
+        if self.process is not None:
+            self._terminate()
+            self.process = None
+        self._close_log()
+        self._pending = None
 
     def _close_log(self):
         if self.log_file:
@@ -237,7 +277,7 @@ class XrecCapture:
         """
         Join segments into video.mp4. Returns video metadata for metadata.json.
         """
-        output_path = os.path.join(self.recording_path, "video.mp4")
+        output_path = os.path.join(self.recording_path, self.output_name)
         for segment in self.segments:
             self._trim_after_stop_request(segment)
         segments = [s for s in self.segments if s.get("frames")]
@@ -280,7 +320,8 @@ class XrecCapture:
         shutil.rmtree(self.segments_dir, ignore_errors=True)
 
         return {
-            "file": "video.mp4",
+            "file": self.output_name,
+            "display_index": self.display_index,
             "codec": "h264",
             "fps": self.fps,
             "width": width,
@@ -365,3 +406,74 @@ class XrecCapture:
         )
         if result.returncode != 0:
             raise RuntimeError(f"Failed to join video segments: {result.stderr[-500:]}")
+
+
+def find_screen_devices() -> dict:
+    """{display index: avfoundation device number} from FFmpeg's device list."""
+    output = run_ffmpeg(["-f", "avfoundation", "-list_devices", "true", "-i", ""]).stderr
+    return {
+        int(screen): device
+        for device, screen in re.findall(r"\[(\d+)\]\s+Capture screen (\d+)", output)
+    }
+
+
+class MultiCapture:
+    """
+    Captures every display as its own video (native resolution each). The main
+    display is display 0 and keeps the file name video.mp4.
+    """
+
+    def __init__(self, recording_path: str, displays: list, fps: int = VIDEO_FPS):
+        devices = find_screen_devices()
+        self.captures = []
+        for display in displays:
+            device = devices.get(display["index"])
+            if device is None:
+                logger.warning(f"MultiCapture: no capture device for display {display['index']}")
+                continue
+            self.captures.append(
+                XrecCapture(recording_path, fps, display["index"], screen_device=device)
+            )
+        if not self.captures:
+            raise RuntimeError("cudAI could not find a screen capture device.")
+
+    @property
+    def primary(self) -> XrecCapture:
+        return self.captures[0]
+
+    def _start_all(self) -> dict:
+        # Launch every display first so they start together, then wait. If any
+        # display fails, stop all of them: never leave a capture running.
+        try:
+            for capture in self.captures:
+                capture.launch_segment()
+            segments = [capture.await_segment_start() for capture in self.captures]
+        except Exception:
+            for capture in self.captures:
+                capture.abort()
+            raise
+        return segments[0]
+
+    def start_recording(self) -> dict:
+        return self._start_all()
+
+    def resume_recording(self) -> dict:
+        return self._start_all()
+
+    def pause_recording(self, requested_at: float | None = None):
+        for capture in self.captures:
+            capture.stop_segment(requested_at)
+
+    def stop_recording(self, requested_at: float | None = None):
+        for capture in self.captures:
+            capture.stop_segment(requested_at)
+
+    def finalize(self) -> list:
+        """Video info per display; the main display must succeed."""
+        results = [self.primary.finalize()]
+        for capture in self.captures[1:]:
+            try:
+                results.append(capture.finalize())
+            except Exception:
+                logger.exception(f"MultiCapture: display {capture.display_index} failed")
+        return results

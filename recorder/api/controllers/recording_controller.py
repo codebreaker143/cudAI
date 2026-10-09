@@ -6,6 +6,7 @@ from flask import request, send_file
 from typing import Tuple, Dict, Any
 
 from core.backend_func import annotate_task
+from core.displays import video_file_name
 from core.utils import RECORDING_DIR
 from services.recording_service import RecordingService
 from services.error_handler import ErrorHandler, handle_api_errors, Validator
@@ -62,7 +63,13 @@ class RecordingController:
     def stream_video(self, recording_name: str):
         """Full recording video with HTTP range support (seekable player)."""
         Validator.validate_recording_name(recording_name)
-        path = os.path.join(RECORDING_DIR, recording_name, "video.mp4")
+        try:
+            display = int(request.args.get("display", 0))
+        except ValueError:
+            return ErrorHandler.create_error_response("Invalid display", 400)
+        if display < 0:
+            return ErrorHandler.create_error_response("Invalid display", 400)
+        path = os.path.join(RECORDING_DIR, recording_name, video_file_name(display))
         if not os.path.exists(path):
             return ErrorHandler.create_error_response("Video not found", 404)
         return send_file(path, mimetype="video/mp4", conditional=True, max_age=0)

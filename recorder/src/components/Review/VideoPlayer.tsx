@@ -56,6 +56,13 @@ const CLICK_VISIBLE = 0.8; // seconds a click indicator stays on screen
 
 interface Props {
     src: string;
+    /**
+     * This video's start minus the shared timeline's start (seconds). All
+     * times passed in and reported out are on the shared timeline.
+     */
+    timeOffset?: number;
+    /** Shared-timeline position to open at. */
+    initialTime?: number;
     aspect: number; // width / height
     knownDuration?: number | null;
     markers: TimelineMarker[];
@@ -67,7 +74,19 @@ interface Props {
 }
 
 const VideoPlayer = forwardRef<VideoPlayerHandle, Props>(function VideoPlayer(
-    { src, aspect, knownDuration, markers, clicks, gaps, onTimeChange, onPrevAction, onNextAction },
+    {
+        src,
+        timeOffset = 0,
+        initialTime = 0,
+        aspect,
+        knownDuration,
+        markers,
+        clicks,
+        gaps,
+        onTimeChange,
+        onPrevAction,
+        onNextAction,
+    },
     ref
 ) {
     const videoRef = useRef<HTMLVideoElement>(null);
@@ -84,24 +103,27 @@ const VideoPlayer = forwardRef<VideoPlayerHandle, Props>(function VideoPlayer(
     const [error, setError] = useState<string | null>(null);
     const [started, setStarted] = useState(false);
 
+    // `time` is this video's own clock; the shared timeline is time + offset.
     const updateTime = useCallback(
         (t: number) => {
             setTime(t);
-            onTimeChange(t);
+            onTimeChange(t + timeOffset);
         },
-        [onTimeChange]
+        [onTimeChange, timeOffset]
     );
 
+    /** Seek to a shared-timeline time. */
     const seek = useCallback(
-        (t: number) => {
+        (sharedTime: number) => {
             const video = videoRef.current;
             if (!video) return;
+            const t = sharedTime - timeOffset;
             const clamped = Math.max(0, Math.min(t, (video.duration || duration) - 0.01));
             video.currentTime = clamped;
             setStarted(true);
             updateTime(clamped);
         },
-        [duration, updateTime]
+        [duration, timeOffset, updateTime]
     );
 
     const togglePlay = useCallback(() => {
@@ -161,19 +183,19 @@ const VideoPlayer = forwardRef<VideoPlayerHandle, Props>(function VideoPlayer(
                     break;
                 case "ArrowLeft":
                     e.preventDefault();
-                    seek(video.currentTime - (e.shiftKey ? 1 : 5));
+                    seek(video.currentTime + timeOffset - (e.shiftKey ? 1 : 5));
                     break;
                 case "ArrowRight":
                     e.preventDefault();
-                    seek(video.currentTime + (e.shiftKey ? 1 : 5));
+                    seek(video.currentTime + timeOffset + (e.shiftKey ? 1 : 5));
                     break;
                 case ",":
                     video.pause();
-                    seek(video.currentTime - frame);
+                    seek(video.currentTime + timeOffset - frame);
                     break;
                 case ".":
                     video.pause();
-                    seek(video.currentTime + frame);
+                    seek(video.currentTime + timeOffset + frame);
                     break;
                 case "ArrowUp":
                 case "j":
@@ -189,7 +211,7 @@ const VideoPlayer = forwardRef<VideoPlayerHandle, Props>(function VideoPlayer(
         };
         window.addEventListener("keydown", onKey);
         return () => window.removeEventListener("keydown", onKey);
-    }, [seek, togglePlay, onPrevAction, onNextAction]);
+    }, [seek, togglePlay, onPrevAction, onNextAction, timeOffset]);
 
     const ratioFromEvent = (clientX: number) => {
         const rect = trackRef.current!.getBoundingClientRect();
@@ -199,21 +221,24 @@ const VideoPlayer = forwardRef<VideoPlayerHandle, Props>(function VideoPlayer(
     const onTrackPointerDown = (e: React.PointerEvent) => {
         (e.target as HTMLElement).setPointerCapture(e.pointerId);
         setScrubbing(true);
-        seek(ratioFromEvent(e.clientX) * duration);
+        seek(ratioFromEvent(e.clientX) * duration + timeOffset);
     };
     const onTrackPointerMove = (e: React.PointerEvent) => {
         const ratio = ratioFromEvent(e.clientX);
         const rect = trackRef.current!.getBoundingClientRect();
         setHover({ x: ratio * rect.width, time: ratio * duration });
-        if (scrubbing) seek(ratio * duration);
+        if (scrubbing) seek(ratio * duration + timeOffset);
     };
 
-    const pct = (t: number) => (duration > 0 ? `${(t / duration) * 100}%` : "0%");
+    // Props are on the shared timeline; convert to this video's clock.
+    const pct = (sharedTime: number) =>
+        duration > 0 ? `${((sharedTime - timeOffset) / duration) * 100}%` : "0%";
+    const sharedNow = time + timeOffset;
     const visibleClicks = useMemo(
-        () => clicks.filter((c) => time >= c.time && time - c.time < CLICK_VISIBLE),
-        [clicks, time]
+        () => clicks.filter((c) => sharedNow >= c.time && sharedNow - c.time < CLICK_VISIBLE),
+        [clicks, sharedNow]
     );
-    const inGap = gaps.some((g) => time >= g.start && time < g.end);
+    const inGap = gaps.some((g) => sharedNow >= g.start && sharedNow < g.end);
 
     return (
         <div ref={rootRef} className="flex h-full flex-col bg-zinc-950">
@@ -235,13 +260,19 @@ const VideoPlayer = forwardRef<VideoPlayerHandle, Props>(function VideoPlayer(
                         }}
                         onSeeked={() => videoRef.current && updateTime(videoRef.current.currentTime)}
                         onLoadedMetadata={() => {
-                            const d = videoRef.current?.duration;
-                            if (d && isFinite(d)) setDuration(d);
+                            const video = videoRef.current;
+                            if (!video) return;
+                            if (video.duration && isFinite(video.duration)) setDuration(video.duration);
+                            if (initialTime > 0) {
+                                video.currentTime = Math.max(0, initialTime - timeOffset);
+                                updateTime(video.currentTime);
+                                setStarted(true);
+                            }
                         }}
                         onError={() => setError("This video could not be loaded.")}
                     />
                     {visibleClicks.map((c, i) => {
-                        const age = (time - c.time) / CLICK_VISIBLE;
+                        const age = (sharedNow - c.time) / CLICK_VISIBLE;
                         return (
                             <span
                                 key={`${c.time}-${i}`}
@@ -296,11 +327,14 @@ const VideoPlayer = forwardRef<VideoPlayerHandle, Props>(function VideoPlayer(
                             <div
                                 key={i}
                                 className="absolute inset-y-0 bg-amber-400/40"
-                                style={{ left: pct(g.start), width: pct(g.end - g.start) }}
+                                style={{
+                                    left: pct(g.start),
+                                    width: duration > 0 ? `${((g.end - g.start) / duration) * 100}%` : "0%",
+                                }}
                                 title="Paused"
                             />
                         ))}
-                        <div className="absolute inset-y-0 left-0 rounded-full bg-indigo-500" style={{ width: pct(time) }} />
+                        <div className="absolute inset-y-0 left-0 rounded-full bg-indigo-500" style={{ width: pct(sharedNow) }} />
                     </div>
                     {markers.map((m, i) => (
                         <div
@@ -314,14 +348,14 @@ const VideoPlayer = forwardRef<VideoPlayerHandle, Props>(function VideoPlayer(
                     ))}
                     <div
                         className="pointer-events-none absolute top-1/2 h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white shadow ring-2 ring-indigo-500"
-                        style={{ left: pct(time) }}
+                        style={{ left: pct(sharedNow) }}
                     />
                     {hover && (
                         <div
                             className="pointer-events-none absolute -top-7 -translate-x-1/2 rounded bg-zinc-800 px-1.5 py-0.5 font-mono text-[11px] text-white"
                             style={{ left: hover.x }}
                         >
-                            {formatPrecise(hover.time)}
+                            {formatPrecise(hover.time + timeOffset)}
                         </div>
                     )}
                 </div>
@@ -349,7 +383,7 @@ const VideoPlayer = forwardRef<VideoPlayerHandle, Props>(function VideoPlayer(
                         <ChevronRightIcon className="h-5 w-5" />
                     </button>
                     <span className="ml-2 font-mono text-xs tabular-nums text-zinc-300">
-                        {formatClock(time)} / {formatClock(duration)}
+                        {formatClock(sharedNow)} / {formatClock(duration + timeOffset)}
                     </span>
                     <div className="ml-auto flex items-center gap-1">
                         <select

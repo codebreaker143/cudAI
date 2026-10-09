@@ -92,6 +92,18 @@ export default function DetailsPanel({ data }: { data: ReviewData }) {
                 </div>
             </Section>
 
+            {(stats.sites || []).length > 0 && (
+                <Section title="Websites">
+                    <div className="flex flex-wrap gap-1">
+                        {stats.sites.map((site: string) => (
+                            <Badge key={site} tone="sky">
+                                {site}
+                            </Badge>
+                        ))}
+                    </div>
+                </Section>
+            )}
+
             <Section title="Captured events">
                 {Object.keys(counts).length === 0 ? (
                     <span className="text-sm text-zinc-500">—</span>

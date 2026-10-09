@@ -76,3 +76,49 @@ def test_record_pause_resume_stop_and_process():
 
     # Raw files are locked after processing; unlock so the temp dir can be removed.
     os.system(f"chflags -R nouchg '{folder}'")
+
+
+def test_multi_display_capture():
+    """
+    Every connected display is recorded as its own video. Needs a second
+    (non-mirrored) display; macOS cannot capture one screen twice, so this
+    cannot be simulated on a single display.
+    """
+    from backend import CudaiBackend
+    from core.displays import list_displays
+    from core.utils import RECORDING_DIR
+
+    displays = list_displays()
+    if len(displays) < 2:
+        pytest.skip("connect a second (non-mirrored) display to run this test")
+
+    before = set(os.listdir(RECORDING_DIR)) if os.path.isdir(RECORDING_DIR) else set()
+    backend = CudaiBackend()
+    http = backend.app.test_client()
+    version = http.get("/api/consent").get_json()["current_version"]
+    http.post("/api/consent", json={"accepted": True, "version": version})
+    sio = backend.socketio.test_client(backend.app)
+    for event, wait in (("start_record", 2), ("pause_record", 1), ("resume_record", 2), ("stop_record", 0)):
+        sio.emit(event, {})
+        assert reply(sio, event)["status"] == "succeed", event
+        time.sleep(wait)
+    assert reply(sio, "reduced")["status"] == "succeed"
+
+    (name,) = set(os.listdir(RECORDING_DIR)) - before
+    folder = os.path.join(RECORDING_DIR, name)
+    metadata = json.load(open(os.path.join(folder, "metadata.json")))
+    videos = [d["video"] for d in metadata["displays"]]
+    assert videos[0]["file"] == "video.mp4"
+    assert all(v is not None for v in videos), "a display produced no video"
+    for v in videos:
+        assert os.path.exists(os.path.join(folder, v["file"]))
+        assert len(v["segments"]) == 2 and len(v["paused_gaps"]) == 1
+    # All displays start together (within half a second).
+    starts = [v["video_start_timestamp"] for v in videos]
+    assert max(starts) - min(starts) < 0.5
+
+    review = http.get(f"/api/recording/{name}/review").get_json()
+    assert [d["index"] for d in review["displays"]] == [d["index"] for d in displays]
+    second_video = http.get(review["displays"][1]["video_url"], headers={"Range": "bytes=0-99"})
+    assert second_video.status_code == 206
+    os.system(f"chflags -R nouchg '{folder}'")

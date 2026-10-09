@@ -89,13 +89,30 @@ def get_active_app_info() -> dict | None:
     return impl.get_active_app_info()
 
 
-def enable_full_accessibility(pid: int) -> None:
-    """Make Chromium/Electron apps expose web content to accessibility (macOS)."""
+
+def enable_full_accessibility(pid: int, bundle_id: str | None = None) -> dict:
+    """Make browsers/Electron apps expose web content to accessibility (macOS)."""
     if impl is not None and hasattr(impl, "enable_full_accessibility"):
-        impl.enable_full_accessibility(pid)
+        return impl.enable_full_accessibility(pid, bundle_id)
+    return {}
 
 
-def running_app_pids() -> list:
-    if impl is not None and hasattr(impl, "running_app_pids"):
-        return impl.running_app_pids()
+def restore_accessibility(pid: int, previous: dict) -> None:
+    if impl is not None and hasattr(impl, "restore_accessibility"):
+        impl.restore_accessibility(pid, previous)
+
+
+def running_apps() -> list:
+    if impl is not None and hasattr(impl, "running_apps"):
+        return impl.running_apps()
     return []
+
+
+def is_browser(bundle_id: str | None) -> bool:
+    return impl is not None and hasattr(impl, "is_browser") and impl.is_browser(bundle_id)
+
+
+def get_browser_url(pid: int) -> str | None:
+    if impl is not None and hasattr(impl, "get_browser_url"):
+        return impl.get_browser_url(pid)
+    return None

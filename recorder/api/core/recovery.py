@@ -16,6 +16,7 @@ from datetime import datetime
 
 from .logger import logger
 from .utils import RECORDING_DIR, get_ffmpeg_path, read_encrypted_jsonl
+from .displays import segments_dir_name, video_file_name
 from .xrec_capture import XrecCapture
 
 
@@ -56,9 +57,10 @@ def find_interrupted_recordings() -> list:
     found = []
     for name in os.listdir(RECORDING_DIR):
         path = os.path.join(RECORDING_DIR, name)
-        if (
-            os.path.isdir(os.path.join(path, "segments"))
-            and not os.path.exists(os.path.join(path, "video.mp4"))
+        # The main display (0) is required for a usable recording, so its
+        # missing video.mp4 marks an interrupted one.
+        if os.path.isdir(os.path.join(path, segments_dir_name(0))) and not os.path.exists(
+            os.path.join(path, video_file_name(0))
         ):
             found.append(path)
     return found
@@ -92,23 +94,41 @@ def recover_recording(recording_path: str) -> bool:
     last_event = events[-1]["time_stamp"] if events else None
     stop_requests = [p["start_timestamp"] for p in pauses] + [last_event]
 
-    capture = XrecCapture(recording_path)
-    capture.load_segments_from_disk(stop_requests)
-    if not capture.segments:
-        logger.warning(f"recovery: no usable video in {recording_id}")
-        return False
-
     metadata_path = os.path.join(recording_path, "metadata.json")
     manager = MetadataManager(recording_path=recording_path, recording_id=recording_id)
     if os.path.exists(metadata_path):
         with open(metadata_path, "r", encoding="utf-8") as f:
             manager.metadata.update(json.load(f))
 
+    # One capture per display that left segments behind (display 0 first).
+    indexes = sorted(
+        {d["index"] for d in manager.metadata.get("displays") or []} | {0}
+    )
+    captures = []
+    for index in indexes:
+        if not os.path.isdir(os.path.join(recording_path, segments_dir_name(index))):
+            continue
+        capture = XrecCapture(recording_path, display_index=index)
+        capture.load_segments_from_disk(stop_requests)
+        if capture.segments:
+            captures.append(capture)
+    if not captures or captures[0].display_index != 0:
+        logger.warning(f"recovery: no usable video in {recording_id}")
+        return False
+
     manager.metadata["pauses"] = pauses
     manager.metadata["recovered"] = True
-    end = last_event or capture.segments[-1]["start_timestamp"]
+    end = last_event or captures[0].segments[-1]["start_timestamp"]
     manager.metadata["stop_time"] = _to_iso(manager.metadata, end)
-    manager.set_video(capture.finalize())
+    videos = [captures[0].finalize()]
+    for capture in captures[1:]:
+        try:
+            videos.append(capture.finalize())
+        except Exception:
+            logger.exception(f"recovery: display {capture.display_index} could not be recovered")
+    manager.set_video(videos[0])
+    if manager.metadata.get("displays"):
+        manager.set_display_videos(videos)
     manager.save_metadata()
     logger.info(f"recovery: recovered interrupted recording {recording_id}")
     return True

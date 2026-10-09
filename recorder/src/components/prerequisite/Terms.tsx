@@ -65,15 +65,17 @@ const TermsAndConsent: React.FC<TermsAndConsentProps> = ({
                             paused, cudAI captures:
                         </p>
                         <ul className="mt-2 list-disc pl-5 space-y-1">
-                            <li>a video of your main display;</li>
+                            <li>a video of each of your displays;</li>
                             <li>
                                 mouse movements, clicks and scrolls, and keyboard
                                 input, including the text you type and the
                                 shortcuts you use;
                             </li>
                             <li>
-                                the name of the active application and the title
-                                and position of its window;
+                                the name of the active application, the title
+                                and position of its window and, in web browsers,
+                                the address of the page (without the part after
+                                “?”, which can contain personal details);
                             </li>
                             <li>
                                 accessibility information about the on-screen

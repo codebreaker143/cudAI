@@ -55,7 +55,7 @@ function describe(e: TimelineEvent): { badge: React.ReactNode; text: string } {
         case "window":
             return {
                 badge: <Badge tone={e.is_recorder ? "neutral" : "violet"}>{e.is_recorder ? "cudAI" : "App"}</Badge>,
-                text: [e.app_name, e.window_title].filter(Boolean).join(" — "),
+                text: [e.app_name, e.window_title, e.url].filter(Boolean).join(" — "),
             };
         default:
             return { badge: <Badge>{e.type}</Badge>, text: "" };

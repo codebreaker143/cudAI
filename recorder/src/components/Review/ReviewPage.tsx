@@ -138,6 +138,7 @@ export default function ReviewPage() {
     const [saving, setSaving] = useState(false);
     const [time, setTime] = useState(0);
     const [tab, setTab] = useState<Tab>("actions");
+    const [displayIndex, setDisplayIndex] = useState(0);
     const [selecting, setSelecting] = useState(false);
     const [selection, setSelection] = useState<[number, number] | null>(null);
     const [anchor, setAnchor] = useState<number | null>(null);
@@ -282,23 +283,33 @@ export default function ReviewPage() {
         [actions, actionTimes]
     );
 
+    const display = data?.displays.find((d) => d.index === displayIndex) ?? data?.displays[0];
+    // This display's video starts slightly after/before the main one.
+    const timeOffset = display && data ? display.video_start_timestamp - data.video_start_timestamp : 0;
+
     const clicks: ClickMark[] = useMemo(() => {
-        if (!data?.display.logical_width || !data.display.logical_height) return [];
-        const w = data.display.logical_width;
-        const h = data.display.logical_height;
+        if (!data || !display?.bounds.width || !display.bounds.height) return [];
+        const { x: bx, y: by, width: w, height: h } = display.bounds;
         return data.timeline
-            .filter((e) => e.type === "click" && e.pressed && e.x != null && e.y != null)
-            .map((e) => ({ time: e.t_video, x: e.x! / w, y: e.y! / h }))
+            .filter(
+                (e) =>
+                    e.type === "click" &&
+                    e.pressed &&
+                    e.x != null &&
+                    e.y != null &&
+                    (e.display == null ? display.index === 0 : e.display === display.index)
+            )
+            .map((e) => ({ time: e.t_video, x: (e.x! - bx) / w!, y: (e.y! - by) / h! }))
             .filter((c) => c.x >= 0 && c.x <= 1 && c.y >= 0 && c.y <= 1);
-    }, [data]);
+    }, [data, display]);
 
     const gaps: GapSpan[] = useMemo(
         () =>
-            (data?.video.paused_gaps || []).map((g) => ({
-                start: g.video_offset,
-                end: g.video_offset + g.frames / (data?.video.fps || 30),
+            (display?.paused_gaps || []).map((g) => ({
+                start: g.video_offset + timeOffset,
+                end: g.video_offset + timeOffset + g.frames / (data?.video.fps || 30),
             })),
-        [data]
+        [data, display, timeOffset]
     );
 
     if (loadError) {
@@ -325,11 +336,12 @@ export default function ReviewPage() {
         );
     }
 
+    const shown = display ?? data.displays[0];
     const aspect =
-        data.video.width && data.video.height
-            ? data.video.width / data.video.height
-            : data.display.logical_width && data.display.logical_height
-            ? data.display.logical_width / data.display.logical_height
+        shown?.width && shown?.height
+            ? shown.width / shown.height
+            : shown?.bounds.width && shown?.bounds.height
+            ? shown.bounds.width / shown.bounds.height
             : 16 / 10;
 
     const TABS: { key: Tab; label: string; count?: number }[] = [
@@ -349,19 +361,43 @@ export default function ReviewPage() {
             />
 
             <div className="flex min-h-0 flex-1">
-                <div className="min-w-0 flex-1">
-                    <VideoPlayer
-                        ref={playerRef}
-                        src={mediaUrl(data.video_url)}
-                        aspect={aspect}
-                        knownDuration={data.video.duration}
-                        markers={markers}
-                        clicks={clicks}
-                        gaps={gaps}
-                        onTimeChange={onTimeChange}
-                        onPrevAction={prevAction}
-                        onNextAction={nextAction}
-                    />
+                <div className="flex min-w-0 flex-1 flex-col">
+                    {data.displays.length > 1 && (
+                        <div className="flex items-center gap-1 border-b border-zinc-800 bg-zinc-950 px-4 py-2">
+                            {data.displays.map((d, i) => (
+                                <button
+                                    key={d.index}
+                                    onClick={() => setDisplayIndex(d.index)}
+                                    className={cx(
+                                        "rounded-md px-2.5 py-1 text-xs font-medium",
+                                        d.index === shown.index
+                                            ? "bg-white/15 text-white"
+                                            : "text-zinc-400 hover:bg-white/10 hover:text-zinc-200"
+                                    )}
+                                >
+                                    {d.is_main ? "Main display" : `Display ${i + 1}`}
+                                    {d.width ? ` · ${d.width}×${d.height}` : ""}
+                                </button>
+                            ))}
+                        </div>
+                    )}
+                    <div className="min-h-0 flex-1">
+                        <VideoPlayer
+                            key={shown.index}
+                            ref={playerRef}
+                            src={mediaUrl(shown.video_url)}
+                            timeOffset={timeOffset}
+                            initialTime={lastTime.current}
+                            aspect={aspect}
+                            knownDuration={shown.duration}
+                            markers={markers}
+                            clicks={clicks}
+                            gaps={gaps}
+                            onTimeChange={onTimeChange}
+                            onPrevAction={prevAction}
+                            onNextAction={nextAction}
+                        />
+                    </div>
                 </div>
 
                 <aside className="flex min-h-0 w-[26rem] shrink-0 flex-col border-l border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">

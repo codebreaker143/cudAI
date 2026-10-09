@@ -146,7 +146,7 @@ const TIPS = [
     {
         icon: <EyeSlashIcon className="h-5 w-5 text-indigo-500" />,
         title: "Close what you don't want captured",
-        text: "Everything on your main display is recorded, including notifications.",
+        text: "Everything on all your displays is recorded, including notifications.",
     },
     {
         icon: <KeyIcon className="h-5 w-5 text-indigo-500" />,

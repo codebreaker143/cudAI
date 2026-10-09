@@ -71,25 +71,81 @@ def get_top_window_name() -> str:
         return "Desktop"
 
 
-def enable_full_accessibility(pid: int) -> None:
+# Browsers expose web page content to accessibility only when they think a
+# screen reader is running. Chromium browsers and Firefox respond to
+# AXEnhancedUserInterface (what VoiceOver sets); Electron apps (VS Code, Slack,
+# Teams) respond to AXManualAccessibility. Safari exposes content by default.
+BROWSER_BUNDLE_PREFIXES = (
+    "com.google.Chrome",
+    "com.microsoft.edgemac",
+    "com.brave.Browser",
+    "company.thebrowser.Browser",  # Arc
+    "com.operasoftware.Opera",
+    "com.vivaldi.Vivaldi",
+    "org.chromium.Chromium",
+    "org.mozilla.firefox",
+)
+
+
+def is_browser(bundle_id: str | None) -> bool:
+    return bool(bundle_id) and bundle_id.startswith(BROWSER_BUNDLE_PREFIXES)
+
+
+def _ax_attribute(element, name):
+    err, value = ApplicationServices.AXUIElementCopyAttributeValue(element, name, None)
+    return value if err == 0 else None
+
+
+def enable_full_accessibility(pid: int, bundle_id: str | None) -> dict:
     """
-    Ask Chromium-based apps (Chrome, Edge, Electron apps such as VS Code,
-    Slack, Teams) to expose their full accessibility tree. They only do so
-    when they believe assistive technology is running; without this, clicks
-    inside web content resolve to a generic "scroll area". Other apps ignore
-    the attribute. The tree is built asynchronously after enabling.
+    Make the app expose its full accessibility tree (UI element labels for
+    clicks, page URLs). Returns the previous values so they can be restored.
+    The tree is built asynchronously after enabling.
     """
     app = ApplicationServices.AXUIElementCreateApplication(pid)
     ApplicationServices.AXUIElementSetAttributeValue(app, "AXManualAccessibility", True)
+    previous = {}
+    if is_browser(bundle_id):
+        previous["AXEnhancedUserInterface"] = bool(_ax_attribute(app, "AXEnhancedUserInterface"))
+        ApplicationServices.AXUIElementSetAttributeValue(app, "AXEnhancedUserInterface", True)
+    return previous
 
 
-def running_app_pids() -> list:
+def restore_accessibility(pid: int, previous: dict) -> None:
+    app = ApplicationServices.AXUIElementCreateApplication(pid)
+    for name, value in previous.items():
+        ApplicationServices.AXUIElementSetAttributeValue(app, name, value)
+
+
+def running_apps() -> list:
+    """(pid, bundle_id) of regular (Dock-visible) apps."""
     workspace = AppKit.NSWorkspace.sharedWorkspace()
     return [
-        int(app.processIdentifier())
+        (int(app.processIdentifier()), str(app.bundleIdentifier() or ""))
         for app in workspace.runningApplications()
         if app.activationPolicy() == AppKit.NSApplicationActivationPolicyRegular
     ]
+
+
+def get_browser_url(pid: int) -> str | None:
+    """URL of the page in the app's focused window (first web area found)."""
+    app = ApplicationServices.AXUIElementCreateApplication(pid)
+    window = _ax_attribute(app, "AXFocusedWindow")
+    if window is None:
+        return None
+    queue, visited = [(window, 0)], 0
+    while queue and visited < 400:
+        element, depth = queue.pop(0)
+        visited += 1
+        if _ax_attribute(element, "AXRole") == "AXWebArea":
+            url = _ax_attribute(element, "AXURL")
+            return str(url.absoluteString()) if url is not None else None
+        if depth < 12:
+            queue.extend((child, depth + 1) for child in _ax_attribute(element, "AXChildren") or [])
+    return None
+
+
+MIN_WINDOW_SIZE = 120  # points
 
 
 def get_active_app_info() -> dict | None:
@@ -112,6 +168,14 @@ def get_active_app_info() -> dict | None:
             continue
         owner = win.get("kCGWindowOwnerName", "")
         if owner in ("Window Server", "Dock"):
+            continue
+        # Skip transient helper windows (popups, tooltips, overlays).
+        bounds = win.get("kCGWindowBounds") or {}
+        if (
+            win.get("kCGWindowAlpha", 1) < 0.05
+            or bounds.get("Width", 0) < MIN_WINDOW_SIZE
+            or bounds.get("Height", 0) < MIN_WINDOW_SIZE
+        ):
             continue
         pid = int(win.get("kCGWindowOwnerPID", 0))
         bundle_id = None

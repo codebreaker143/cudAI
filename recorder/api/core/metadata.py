@@ -176,6 +176,15 @@ class MetadataManager:
         if self.metadata["pauses"] and self.metadata["pauses"][-1]["end_timestamp"] is None:
             self.metadata["pauses"][-1]["end_timestamp"] = end
 
+    def set_displays(self, displays: list):
+        """All displays captured in this recording (one video per display)."""
+        self.metadata["displays"] = [{**d, "video": None} for d in displays]
+
+    def set_display_videos(self, videos: list):
+        by_index = {v["display_index"]: v for v in videos}
+        for display in self.metadata.get("displays", []):
+            display["video"] = by_index.get(display["index"])
+
     def set_video(self, video: dict):
         self.metadata["video"] = video
         self.metadata["video_start_timestamp"] = video["video_start_timestamp"]

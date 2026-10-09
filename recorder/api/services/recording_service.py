@@ -282,6 +282,42 @@ class RecordingService:
         timeline = [e for e in timeline if e["type"] != "move"]
 
         video = metadata.get("video") or manifest.get("video") or {}
+        display = manifest.get("display") or {
+            "logical_width": metadata.get("screen_width"),
+            "logical_height": metadata.get("screen_height"),
+        }
+        displays = []
+        for d in metadata.get("displays") or []:
+            dv = d.get("video")
+            if not dv:
+                continue
+            displays.append({
+                "index": d["index"],
+                "is_main": d.get("is_main", d["index"] == 0),
+                "builtin": d.get("builtin"),
+                "bounds": d["bounds"],
+                "scale_factor": d.get("scale_factor"),
+                "video_url": f"/api/recording/{recording_name}/video.mp4?display={d['index']}",
+                "video_start_timestamp": dv["video_start_timestamp"],
+                "width": dv.get("width"),
+                "height": dv.get("height"),
+                "duration": dv.get("duration"),
+                "paused_gaps": dv.get("paused_gaps") or [],
+            })
+        if not displays:  # recordings from before multi-display capture
+            displays.append({
+                "index": 0,
+                "is_main": True,
+                "builtin": None,
+                "bounds": {"x": 0, "y": 0, "width": display.get("logical_width"), "height": display.get("logical_height")},
+                "scale_factor": display.get("scale_factor"),
+                "video_url": f"/api/recording/{recording_name}/video.mp4",
+                "video_start_timestamp": metadata["video_start_timestamp"],
+                "width": video.get("width"),
+                "height": video.get("height"),
+                "duration": video.get("duration"),
+                "paused_gaps": video.get("paused_gaps") or [],
+            })
         return SUCCEED, {
             "recording_id": recording_name,
             "path": folder,
@@ -297,10 +333,8 @@ class RecordingService:
                 "duration": video.get("duration"),
                 "paused_gaps": video.get("paused_gaps") or [],
             },
-            "display": manifest.get("display") or {
-                "logical_width": metadata.get("screen_width"),
-                "logical_height": metadata.get("screen_height"),
-            },
+            "display": display,
+            "displays": displays,
             "actions": data["events"],
             "timeline": timeline,
             "manifest": manifest,

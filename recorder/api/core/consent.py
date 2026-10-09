@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 
 from .utils import get_app_data_dir
 
-CONSENT_VERSION = "2026-09-29.2"
+CONSENT_VERSION = "2026-10-09"
 
 
 def _consent_path() -> str:

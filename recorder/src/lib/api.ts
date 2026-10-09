@@ -80,7 +80,23 @@ export interface TimelineEvent {
     app_name?: string;
     bundle_id?: string | null;
     window_title?: string | null;
+    url?: string | null;
     is_recorder?: boolean;
+    display?: number | null;
+}
+
+export interface DisplayVideo {
+    index: number;
+    is_main: boolean;
+    builtin: boolean | null;
+    bounds: { x: number; y: number; width: number | null; height: number | null };
+    scale_factor: number | null;
+    video_url: string;
+    video_start_timestamp: number;
+    width: number | null;
+    height: number | null;
+    duration: number | null;
+    paused_gaps: PausedGap[];
 }
 
 export interface PausedGap {
@@ -110,6 +126,7 @@ export interface ReviewData {
         logical_height: number | null;
         scale_factor?: number | null;
     };
+    displays: DisplayVideo[];
     actions: Action[];
     timeline: TimelineEvent[];
     manifest: Record<string, any>;
