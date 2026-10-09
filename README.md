@@ -7,6 +7,8 @@ and cannot be withdrawn in the app. Nothing is recorded while paused, and
 recordings cannot be deleted from the app; raw files are locked (macOS
 `uchg`) once processed.
 
+Current progress and roadmap: [docs/STATUS.md](docs/STATUS.md).
+
 ## What a recording contains
 
 Recordings are stored per user in the app data directory
