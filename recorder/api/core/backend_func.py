@@ -4,6 +4,7 @@ import uuid
 from flask import jsonify, request
 
 from .logger import logger
+from .privacy import redact_text
 from .export import write_export
 from .utils import (
     RECORDING_DIR,
@@ -45,8 +46,8 @@ def annotate_task(recording_name, socketservice):
         logger.warning("annotate_task must have cutTaskName")
         return jsonify({"error": "annotate_task must have cutTaskName"}), 400
 
-    task_name = data["cutTaskName"]
-    description = data.get("cutDescription", "")
+    task_name = redact_text(data["cutTaskName"])
+    description = redact_text(data.get("cutDescription", ""))
     start_idx = int(data["valMin"]) - 1
     end_idx = int(data["valMax"]) - 1
 

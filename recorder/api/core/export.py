@@ -164,6 +164,7 @@ def write_export(recording_path: str) -> dict | None:
             "recorder": metadata.get("recorder"),
             "contributor_id": metadata.get("contributor_id"),
             "consent": metadata.get("consent"),
+            "privacy": metadata.get("privacy"),
             "start_time": metadata.get("start_time"),
             "stop_time": metadata.get("stop_time"),
             "environment": {

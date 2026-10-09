@@ -24,9 +24,17 @@ from core.utils import (
     check_recording_broken,
     lock_raw_files,
     primary_screen_size,
+    unlock_raw_files,
 )
 from core.backend_func import read_recording_status
 from core.consent import has_current_consent
+from core.privacy import (
+    PRIVACY_VERSION,
+    privacy_version,
+    redact_recording_inputs,
+    redact_recording_outputs,
+    redact_text,
+)
 from core.permissions import missing_permissions
 from core.export import build_timeline, write_export
 from core.recovery import (
@@ -86,6 +94,30 @@ class RecordingService:
                     logger.exception(f"RecordingService: could not recover {path}")
         except Exception:
             logger.exception("RecordingService: recovery failed")
+        self._backfill_privacy()
+
+    def _backfill_privacy(self) -> None:
+        """
+        Redact personal/sensitive data from recordings processed before the
+        current privacy rules. Annotation edits in the action files are kept.
+        """
+        if not os.path.isdir(RECORDING_DIR):
+            return
+        for name in os.listdir(RECORDING_DIR):
+            folder = os.path.join(RECORDING_DIR, name)
+            processed = os.path.exists(os.path.join(folder, "reduced_events_vis.jsonl"))
+            has_metadata = os.path.exists(os.path.join(folder, "metadata.json"))
+            if not processed or not has_metadata or privacy_version(folder) >= PRIVACY_VERSION:
+                continue
+            try:
+                unlock_raw_files(folder)
+                redact_recording_inputs(folder)
+                redact_recording_outputs(folder)
+                write_export(folder)
+            except Exception:
+                logger.exception(f"RecordingService: privacy backfill failed for {name}")
+            finally:
+                lock_raw_files(folder)
 
     def _make_reducer(self, recording_path: str) -> Reducer:
         width, height = primary_screen_size()
@@ -346,7 +378,10 @@ class RecordingService:
             return FAILED, "Recording not found"
         write_encrypted_json(
             os.path.join(folder, "task_name.json"),
-            {"task_name": task_name.strip(), "description": (description or "").strip()},
+            {
+                "task_name": redact_text(task_name.strip()),
+                "description": redact_text((description or "").strip()),
+            },
         )
         write_export(folder)
         if self.user_recordings and recording_name in self.user_recordings:

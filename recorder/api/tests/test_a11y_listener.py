@@ -5,10 +5,10 @@ import core.a11y_listener as listener_module
 from core.a11y_listener import A11yListener, sanitize_url
 
 
-def test_url_query_and_fragment_are_removed():
+def test_url_keeps_state_but_redacts_secrets_and_pii():
     assert (
         sanitize_url("https://erp.example.com/po/4500?session=SECRET&user=a@b.com#step2")
-        == "https://erp.example.com/po/4500"
+        == "https://erp.example.com/po/4500?session=[SECRET]&user=[EMAIL]#step2"
     )
     assert sanitize_url(None) is None
 

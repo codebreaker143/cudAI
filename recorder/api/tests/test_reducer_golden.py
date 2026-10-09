@@ -3,7 +3,7 @@ Regression guard for action extraction.
 
 The reducer turns raw input into the actions buyers receive. This test runs it
 on a deterministic synthetic recording and compares a fingerprint of the
-output. If you change reduction behavior on purpose, inspect the new output and
+output (after privacy redaction: the typed vendor@acme.com becomes [EMAIL]). If you change reduction behavior on purpose, inspect the new output and
 update EXPECTED.
 """
 
@@ -15,8 +15,8 @@ from tests.synthetic import write_synthetic_recording
 
 EXPECTED = {
     "actions": 97,
-    "reduced_events_vis.jsonl": "677ef81759206ca0",
-    "reduced_events_complete.jsonl": "d540822a7d544dd0",
+    "reduced_events_vis.jsonl": "3f2fe55016a39137",
+    "reduced_events_complete.jsonl": "6d7a513007a51473",
 }
 
 

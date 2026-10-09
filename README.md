@@ -29,6 +29,27 @@ first frame is taken from the capture device's own timestamp (same clock), so
 coordinates are logical points; multiply by `display.scale_factor` for video
 pixels.
 
+### Privacy
+
+Before anything is derived from a recording, `api/core/privacy.py` removes
+personal and sensitive data from all recorded text (keystrokes, window
+titles, page URLs, accessibility element text, task names) and replaces it
+with typed placeholders, so the training signal survives:
+
+| Placeholder | Removed |
+| --- | --- |
+| `[SECRET]` | passwords, tokens, API keys, private keys, credential URL parameters |
+| `[EMAIL]` `[PHONE]` | contact details |
+| `[CARD]` `[IBAN]` `[BANK_ACCOUNT]` | card (Luhn-checked) and bank numbers |
+| `[AADHAAR]` `[PAN]` `[SSN]` `[PASSPORT]` | government ID numbers |
+| `[IP]` `[MAC]` | network and device identifiers |
+
+Typed values are redacted key by key (the physical key names are scrubbed
+too). URLs keep their structure, query strings and fragments (app state such
+as SAP Fiori routes and search terms). `manifest.json` → `privacy` records the
+policy version and redaction counts. **The video is not redacted.** Older
+recordings are redacted automatically on the next launch.
+
 Keyboard events carry `name` (physical key, stable across modifiers), `char`
 (what the OS produced), `text` (what the press contributed to typed text, if
 any) and `modifiers`. The app's own shortcuts and input to the cudAI window are

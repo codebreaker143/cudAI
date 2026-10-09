@@ -74,8 +74,7 @@ const TermsAndConsent: React.FC<TermsAndConsentProps> = ({
                             <li>
                                 the name of the active application, the title
                                 and position of its window and, in web browsers,
-                                the address of the page (without the part after
-                                “?”, which can contain personal details);
+                                the address of the page;
                             </li>
                             <li>
                                 accessibility information about the on-screen
@@ -99,8 +98,17 @@ const TermsAndConsent: React.FC<TermsAndConsentProps> = ({
                             Protect sensitive information
                         </h2>
                         <p className="mt-2">
-                            Everything visible on your screen and everything you
-                            type while recording is captured. Pause before entering
+                            cudAI automatically removes passwords, access tokens and
+                            keys, email addresses, phone numbers, card and bank
+                            account numbers, government ID numbers (such as Aadhaar,
+                            PAN, SSN and passport numbers) and IP/MAC addresses from
+                            the recorded text: typing, window titles, page
+                            addresses and on-screen element labels. They are
+                            replaced with labels such as [EMAIL].
+                        </p>
+                        <p className="mt-2">
+                            The screen video is not redacted. Everything visible on
+                            your screen is captured, so pause before entering
                             passwords, payment details, or personal or confidential
                             information, and do not record other people's data
                             without permission.

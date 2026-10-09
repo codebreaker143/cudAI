@@ -30,6 +30,7 @@ from .reduction_helper import (
 )
 from .preprocess import preprocess_events
 from ..logger import logger
+from ..privacy import redact_recording_inputs, redact_tree
 from ..a11y import parse_element
 from ..utils import (
     write_encrypted_jsonl,
@@ -630,9 +631,7 @@ class Reducer:
         for action in self.reduced_actions:
             attrs = action.complete_dump()
             data.append(attrs)
-        #         print(f"Found WindowsElementDescriber: {item}")
-
-        write_encrypted_jsonl(file_path, data=data)
+        write_encrypted_jsonl(file_path, data=redact_tree(data))
 
     def vis_dump(self, dir):
         os.makedirs(dir, exist_ok=True)
@@ -643,7 +642,8 @@ class Reducer:
             attrs = action.vis_dump()
             data.append(attrs)
 
-        write_encrypted_jsonl(file_path, data=data)
+        # Defense in depth: descriptions combine several keys and elements.
+        write_encrypted_jsonl(file_path, data=redact_tree(data))
 
     def match_element(self):
         def _find_nearest(time_stamp, data):
@@ -815,6 +815,9 @@ class Reducer:
         try:
             start_time = time.perf_counter()
             recording_path = self.recording_path
+            # Remove personal/sensitive data from the raw inputs before
+            # anything (actions, timeline, manifest) is derived from them.
+            redact_recording_inputs(recording_path)
             events = read_encrypted_jsonl(
                 path=os.path.join(recording_path, "events.jsonl")
             )

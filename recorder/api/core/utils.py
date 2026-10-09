@@ -151,6 +151,21 @@ def lock_raw_files(recording_path: str) -> None:
                 logger.warning(f"Could not lock {path}: {e}")
 
 
+def unlock_raw_files(recording_path: str) -> None:
+    """Undo lock_raw_files (used only by the app's own privacy backfill)."""
+    if not hasattr(os, "chflags"):
+        return
+    import stat
+
+    for name in RAW_RECORDING_FILES:
+        path = os.path.join(recording_path, name)
+        if os.path.exists(path):
+            try:
+                os.chflags(path, os.stat(path).st_flags & ~stat.UF_IMMUTABLE)
+            except OSError as e:
+                logger.warning(f"Could not unlock {path}: {e}")
+
+
 def get_task_name_from_folder(recording_name):
     recording_path = os.path.join(RECORDING_DIR, recording_name)
     task_name_path = os.path.join(recording_path, "task_name.json")

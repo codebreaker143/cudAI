@@ -6,8 +6,6 @@ from pynput import mouse
 from queue import Queue
 from threading import Thread
 
-from urllib.parse import urlsplit, urlunsplit
-
 from .a11y import (
     enable_full_accessibility,
     get_active_app_info,
@@ -18,6 +16,8 @@ from .a11y import (
     running_apps,
 )
 from .logger import logger
+from .privacy import redact_text
+from .url_privacy import sanitize_url
 
 
 # Invisible direction marks some apps put in their names ("\u200eWhatsApp").
@@ -26,20 +26,6 @@ _INVISIBLE = re.compile("[\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]")
 
 def clean_text(value):
     return _INVISIBLE.sub("", value).strip() if isinstance(value, str) else value
-
-
-def sanitize_url(url: str | None) -> str | None:
-    """
-    Keep scheme, host and path; drop the query string and fragment, which
-    often carry session tokens, emails or record identifiers.
-    """
-    if not url:
-        return None
-    try:
-        parts = urlsplit(url)
-    except ValueError:
-        return None
-    return urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))
 
 
 def get_recorder_app_pid() -> int | None:
@@ -101,7 +87,7 @@ class A11yListener:
                 info = get_active_app_info()
                 if info is not None:
                     info["app_name"] = clean_text(info["app_name"])
-                    info["window_title"] = clean_text(info["window_title"])
+                    info["window_title"] = redact_text(clean_text(info["window_title"]))
                     self._enable_accessibility(info["pid"], info["bundle_id"])
                     if is_browser(info["bundle_id"]) or info["bundle_id"] == "com.apple.Safari":
                         window = (info["pid"], info["window_title"])
