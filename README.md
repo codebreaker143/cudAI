@@ -33,24 +33,41 @@ pixels.
 
 ### Privacy
 
-Before anything is derived from a recording, `api/core/privacy.py` removes
-personal and sensitive data from all recorded text (keystrokes, window
-titles, page URLs, accessibility element text, task names) and replaces it
-with typed placeholders, so the training signal survives:
+Redaction rules live in one package, [privacy/cudai_privacy](privacy/), built
+on **Microsoft Presidio** and shared by the app and the ingest server.
+Sensitive values are replaced with Presidio entity names, so the training
+signal survives:
 
 | Placeholder | Removed |
 | --- | --- |
 | `[SECRET]` | passwords, tokens, API keys, private keys, credential URL parameters |
-| `[EMAIL]` `[PHONE]` | contact details |
-| `[CARD]` `[IBAN]` `[BANK_ACCOUNT]` | card (Luhn-checked) and bank numbers |
-| `[AADHAAR]` `[PAN]` `[SSN]` `[PASSPORT]` | government ID numbers |
-| `[IP]` `[MAC]` | network and device identifiers |
+| `[EMAIL_ADDRESS]` `[PHONE_NUMBER]` | contact details |
+| `[CREDIT_CARD]` `[IBAN_CODE]` `[BANK_ACCOUNT]` | card (Luhn-checked) and bank numbers |
+| `[IN_AADHAAR]` `[IN_PAN]` `[US_SSN]` `[PASSPORT]` | government ID numbers |
+| `[IP_ADDRESS]` `[MAC_ADDRESS]` | network and device identifiers |
+| `[PERSON]` | people's names (server second pass only, GLiNER) |
 
-Typed values are redacted key by key (the physical key names are scrubbed
-too). URLs keep their structure, query strings and fragments (app state such
-as SAP Fiori routes and search terms). `manifest.json` → `privacy` records the
-policy version and redaction counts. **The video is not redacted.** Older
-recordings are redacted automatically on the next launch.
+On the contributor's Mac, before anything is uploaded:
+
+- **Text** (keystrokes, window titles, page URLs, element text, task names):
+  values are replaced by placeholders. Typed values are redacted key by key,
+  physical key names included. URLs keep their structure, queries and
+  fragments.
+- **Video** (`api/core/redaction.py`, `cudai_privacy/video.py`): each
+  10-second chunk is OCR'd with PaddleOCR's PP-OCR models on ONNX Runtime
+  (RapidOCR), in a low-priority worker process. OpenCV change detection
+  OCRs only frames, and regions, that changed. Values the rules find are
+  covered with solid OpenCV rectangles from the first frame they could
+  appear, and the chunk is re-encoded. Chunks with nothing to mask are not
+  touched.
+- Each chunk also gets an **OCR content layer** (`ocr/<chunk>.jsonl`): text
+  lines with boxes, sensitive values replaced, and the masked boxes.
+
+The local `video.mp4` stays original. The server then removes people's names
+(see [server/README.md](server/README.md)). `manifest.json` → `privacy`
+records the rule version, text redaction counts and the video redaction
+summary. Automatic detection can miss things; contributors are told to pause
+for private information.
 
 ### Cloud upload
 
@@ -60,7 +77,8 @@ New recordings upload automatically while they are recorded
 
 - **Video** is written as standalone 10-second MP4 chunks
   (`chunks/display_N/segment_SSS/chunk_CCCCC.mp4`, 300 frames each), each
-  uploaded as soon as it closes. Frames captured after the contributor
+  uploaded once it is closed **and redacted**; an unredacted chunk is never
+  uploaded. Frames captured after the contributor
   presses pause are cut before the chunk leaves the computer. A crash or
   power loss loses at most the last chunk.
 - **Events** are uploaded every 10 s, redacted first; a typing run still in
@@ -69,6 +87,10 @@ New recordings upload automatically while they are recorded
 - **After processing**, the final files go up and the recording is marked
   complete; local chunks are then deleted (`video.mp4` stays). The server
   rebuilds identical videos from `video.parts` in `metadata.json`.
+
+Every step, from capture through each redaction tool to the upload, is
+timed in `pipeline_timings.jsonl` (`api/core/timing.py`). The review screen's
+**Pipeline timing** section shows per-step medians and capture-to-cloud lag.
 
 Progress is kept in `upload_state.json` per recording, so uploads resume after
 network loss or a restart. Recordings made under terms before
