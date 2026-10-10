@@ -87,9 +87,10 @@ class SystemController:
 
     @handle_api_errors
     def upload_status(self) -> Tuple[Dict[str, Any], int]:
-        return ErrorHandler.create_success_response(
-            self.recording_service.upload_manager.get_status()
-        )
+        return ErrorHandler.create_success_response({
+            **self.recording_service.upload_manager.get_status(),
+            "redaction": self.recording_service.redaction_manager.status,
+        })
 
     @handle_api_errors
     def set_upload_config(self) -> Tuple[Dict[str, Any], int]:

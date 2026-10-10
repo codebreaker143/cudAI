@@ -248,6 +248,13 @@ def recording_upload_status(recording_path: str) -> dict:
         return {"state": "uploaded", "bytes": uploaded, "completed_at": state.get("completed_at")}
     if state.get("error"):
         return {"state": "error", "bytes": uploaded, "error": state["error"]}
+    parts = [p for p in _video_parts(_read_json(os.path.join(recording_path, "metadata.json")))
+             if needs_redaction(p) and p not in state["files"]]
+    pending = [p for p in parts if load_meta(recording_path, p) is None]
+    if pending:
+        total = len([p for p in _video_parts(_read_json(os.path.join(recording_path, "metadata.json")))
+                     if needs_redaction(p)])
+        return {"state": "redacting", "bytes": uploaded, "done": total - len(pending), "total": total}
     return {"state": "uploading" if state["files"] else "waiting", "bytes": uploaded}
 
 
@@ -298,6 +305,7 @@ class UploadManager(threading.Thread):
             "state": "idle",
             "last_upload_at": None,
             "last_error": None,
+            "last_lag_seconds": None,  # capture -> in the cloud, latest chunk
         }
 
     # Called by RecordingService -------------------------------------------
@@ -568,6 +576,7 @@ class UploadManager(threading.Thread):
                 now = time.time()
                 timing.record(path, "chunk_uploaded", captured, now, chunk=part,
                               lag_seconds=round(now - captured, 2))
+                self.status["last_lag_seconds"] = round(now - captured, 1)
 
     def _put_file(
         self, client: UploadClient, path: str, state: dict, remote: str,

@@ -24,12 +24,22 @@ if system() == "Darwin":
         "--add-data=licenses:licenses",
         "--hidden-import", "engineio.async_drivers.gevent",
         "--hidden-import", "geventwebsocket",
+        # Redaction: shared Presidio rules, spaCy tokenizer, OCR models.
+        "--paths", "../../privacy",
+        "--hidden-import", "cudai_privacy.video",
+        "--collect-all", "presidio_analyzer",
+        "--collect-all", "spacy",
+        "--collect-all", "thinc",
+        "--collect-data", "phonenumbers",
+        "--collect-data", "tldextract",
+        "--collect-all", "rapidocr",
+        "--copy-metadata", "presidio-analyzer",
         # Installed for development/tests only; never needed at runtime.
-        "--exclude-module", "cv2",
-        "--exclude-module", "PIL",
         "--exclude-module", "cryptography",
         "--exclude-module", "PyQt6",
         "--exclude-module", "pytest",
+        "--exclude-module", "boto3",
+        "--exclude-module", "botocore",
         "--runtime-hook", "runtime-hook.py",
         "--distpath", "./dist",
         "backend.py"
@@ -41,8 +51,6 @@ else:
         "--hidden-import", "engineio.async_drivers.gevent",
         "--hidden-import", "geventwebsocket",
         # Installed for development/tests only; never needed at runtime.
-        "--exclude-module", "cv2",
-        "--exclude-module", "PIL",
         "--exclude-module", "cryptography",
         "--exclude-module", "PyQt6",
         "--exclude-module", "pytest",
@@ -51,6 +59,9 @@ else:
         "--collect-all", "comtypes",
         "backend.py"
     ]
+
+# Fetch the OCR models now, so they ship inside the app (no download at runtime).
+run([sys.executable, "-c", "from rapidocr import RapidOCR; RapidOCR()"], check=True)
 
 try:
     run(pyinstaller_cmd, check=True, env=os.environ)

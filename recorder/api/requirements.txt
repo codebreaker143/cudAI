@@ -15,6 +15,11 @@ loguru==0.7.2
 # Redaction rules shared with the ingest server (Microsoft Presidio)
 -e ../../privacy
 
+# On-device video redaction: PaddleOCR PP-OCR models on ONNX Runtime, OpenCV masking
+rapidocr==3.10.0
+onnxruntime==1.23.2
+opencv-python-headless==4.10.0.84
+
 # Cloud upload (CA certificates for HTTPS inside the packaged app)
 certifi==2025.11.12
 

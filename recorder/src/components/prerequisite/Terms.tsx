@@ -98,20 +98,35 @@ const TermsAndConsent: React.FC<TermsAndConsentProps> = ({
                             Protect sensitive information
                         </h2>
                         <p className="mt-2">
-                            cudAI automatically removes passwords, access tokens and
-                            keys, email addresses, phone numbers, card and bank
-                            account numbers, government ID numbers (such as Aadhaar,
-                            PAN, SSN and passport numbers) and IP/MAC addresses from
-                            the recorded text: typing, window titles, page
-                            addresses and on-screen element labels. They are
-                            replaced with labels such as [EMAIL_ADDRESS].
+                            On this computer, before anything is uploaded, cudAI
+                            removes passwords, access tokens and keys, email
+                            addresses, phone numbers, card and bank account numbers,
+                            government ID numbers (such as Aadhaar, PAN, SSN and
+                            passport numbers) and IP/MAC addresses:
+                        </p>
+                        <ul className="mt-2 list-disc pl-5 space-y-1">
+                            <li>
+                                from the recorded text (typing, window titles, page
+                                addresses and on-screen element labels), where they
+                                are replaced with labels such as [EMAIL_ADDRESS];
+                            </li>
+                            <li>
+                                from the screen video, where text recognised on
+                                screen as one of these is covered with a solid box.
+                            </li>
+                        </ul>
+                        <p className="mt-2">
+                            People's names are removed on cudAI's servers before a
+                            recording is used for anything. The copy received from
+                            your computer is stored encrypted, is only accessed by
+                            that removal process, and is deleted within 3 days of
+                            it.
                         </p>
                         <p className="mt-2">
-                            The screen video is not redacted. Everything visible on
-                            your screen is captured, so pause before entering
-                            passwords, payment details, or personal or confidential
-                            information, and do not record other people's data
-                            without permission.
+                            Automatic detection can miss things, and no app is
+                            blocked. Pause before entering passwords, payment
+                            details, or personal or confidential information, and do
+                            not record other people's data without permission.
                         </p>
                     </section>
 
@@ -122,7 +137,8 @@ const TermsAndConsent: React.FC<TermsAndConsentProps> = ({
                         <p className="mt-2">
                             Recordings are uploaded automatically to cudAI's secure
                             cloud storage while they are being made, in 10-second
-                            parts, and a copy is kept on this computer. Recordings
+                            parts, each redacted on this computer first as described
+                            above. The original stays on this computer. Recordings
                             cannot be deleted from the app once made. You can review
                             them and edit their task descriptions and annotations;
                             your edits are uploaded too.

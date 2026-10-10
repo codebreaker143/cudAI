@@ -24,13 +24,17 @@ function SyncLine() {
         return () => clearInterval(timer);
     }, []);
     if (!status?.configured) return null;
-    let text = "Waiting for the first upload…";
+    const secs = (s: number) => (s < 90 ? `${Math.round(s)} s` : `${Math.round(s / 60)} min`);
+    let text = "Masking sensitive text before the first upload…";
     if (status.state === "offline") text = "Offline — will upload when back online";
     else if (status.state === "error") text = "Upload problem — see Settings";
     else if (status.last_upload_at) {
-        const ago = Math.max(0, Math.round(now / 1000 - status.last_upload_at));
-        text = `Synced to cloud ${ago < 60 ? `${ago} s` : `${Math.round(ago / 60)} min`} ago`;
+        const ago = Math.max(0, now / 1000 - status.last_upload_at);
+        text = `Synced to cloud ${secs(ago)} ago`;
+        if (status.last_lag_seconds != null) text += ` · ${secs(status.last_lag_seconds)} behind live`;
     }
+    const backlog = status.redaction?.backlog ?? 0;
+    if (backlog > 1) text += ` · ${backlog} chunks waiting for redaction`;
     return <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">{text}</p>;
 }
 

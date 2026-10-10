@@ -42,8 +42,10 @@ export const api = {
 
 /** Cloud upload of one recording. */
 export interface RecordingUpload {
-    state: "local_only" | "waiting" | "uploading" | "uploaded" | "error";
+    state: "local_only" | "waiting" | "redacting" | "uploading" | "uploaded" | "error";
     bytes?: number;
+    done?: number;
+    total?: number;
     completed_at?: string;
     error?: string;
 }
@@ -56,6 +58,28 @@ export interface UploadStatus {
     configured: boolean;
     server_url: string;
     access_key_set: boolean;
+    last_lag_seconds: number | null;
+    redaction?: {
+        backlog: number;
+        current: string | null;
+        last_seconds: number | null;
+        last_error: string | null;
+    };
+}
+
+export interface StageStats {
+    count: number;
+    total?: number;
+    p50?: number;
+    p95?: number;
+    max?: number;
+}
+
+/** GET /api/recording/<id>/timings */
+export interface PipelineTimings {
+    stages: Record<string, StageStats>;
+    chunk_lag: StageStats;
+    chunk_lags: { chunk: string; lag_seconds: number }[];
 }
 
 export interface RecordingSummary {

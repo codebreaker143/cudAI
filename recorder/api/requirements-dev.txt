@@ -2,6 +2,5 @@
 -r requirements.txt
 pytest==9.1.1
 pyflakes==4.0.0
-opencv-python-headless==4.10.0.84  # tests inspect video frames
 python-socketio[client]==5.11.3
 pyinstaller==6.9.0

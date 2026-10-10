@@ -5,6 +5,7 @@ import os
 from flask import request, send_file
 from typing import Tuple, Dict, Any
 
+from core import timing
 from core.backend_func import annotate_task
 from core.displays import video_file_name
 from core.utils import RECORDING_DIR
@@ -24,6 +25,20 @@ class RecordingController:
         """Get list of user recordings."""
         recordings_data = self.recording_service.get_user_recordings()
         return ErrorHandler.create_success_response(recordings_data)
+
+    @handle_api_errors
+    def get_timings(self, recording_name: str) -> Tuple[Dict[str, Any], int]:
+        """How long each pipeline step took for this recording."""
+        Validator.validate_recording_name(recording_name)
+        folder = os.path.join(RECORDING_DIR, recording_name)
+        if not os.path.isdir(folder):
+            return ErrorHandler.create_error_response("Recording not found", 404)
+        lags = [
+            {"chunk": row["chunk"], "lag_seconds": row["lag_seconds"]}
+            for row in timing.load(folder)
+            if row["stage"] == "chunk_uploaded" and "lag_seconds" in row
+        ]
+        return ErrorHandler.create_success_response({**timing.summary(folder), "chunk_lags": lags})
 
     @handle_api_errors
     def confirm_recording(self, recording_name: str) -> Tuple[Dict[str, Any], int]:

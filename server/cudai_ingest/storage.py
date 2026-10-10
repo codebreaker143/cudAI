@@ -64,6 +64,22 @@ class LocalStorage:
     def download(self, key: str, dest: str) -> None:
         shutil.copyfile(self.path(key), dest)
 
+    def upload_file(self, key: str, src: str) -> None:
+        with open(src, "rb") as f:
+            self.put(key, f.read())
+
+    def exists(self, key: str) -> bool:
+        return os.path.exists(self.path(key))
+
+    def list_ids(self, prefix: str) -> list:
+        """Recording ids under prefix/ (e.g. "recordings")."""
+        folder = os.path.join(self.root, "objects", prefix)
+        return sorted(os.listdir(folder)) if os.path.isdir(folder) else []
+
+    def delete_prefix(self, prefix: str) -> None:
+        for tree in ("objects", "meta"):
+            shutil.rmtree(os.path.join(self.root, tree, *prefix.split("/")), ignore_errors=True)
+
     # Signed upload links ------------------------------------------------------
 
     def _signature(self, key: str, sha256: str, size: int, expires: int) -> str:
@@ -143,6 +159,32 @@ class S3Storage:
 
     def download(self, key: str, dest: str) -> None:
         self.s3.download_file(self.bucket, key, dest)
+
+    def upload_file(self, key: str, src: str) -> None:
+        digest = hashlib.sha256()
+        with open(src, "rb") as f:
+            for block in iter(lambda: f.read(1 << 20), b""):
+                digest.update(block)
+        self.s3.upload_file(src, self.bucket, key, ExtraArgs={"Metadata": {"sha256": digest.hexdigest()}})
+
+    def exists(self, key: str) -> bool:
+        return self.sha256(key) is not None or self.read_json(key) is not None
+
+    def list_ids(self, prefix: str) -> list:
+        ids = []
+        for page in self.s3.get_paginator("list_objects_v2").paginate(
+            Bucket=self.bucket, Prefix=prefix.rstrip("/") + "/", Delimiter="/"
+        ):
+            ids += [p["Prefix"].rstrip("/").rsplit("/", 1)[-1] for p in page.get("CommonPrefixes", [])]
+        return sorted(ids)
+
+    def delete_prefix(self, prefix: str) -> None:
+        for page in self.s3.get_paginator("list_objects_v2").paginate(
+            Bucket=self.bucket, Prefix=prefix.rstrip("/") + "/"
+        ):
+            keys = [{"Key": o["Key"]} for o in page.get("Contents", [])]
+            if keys:
+                self.s3.delete_objects(Bucket=self.bucket, Delete={"Objects": keys})
 
     def upload_ticket(self, key: str, sha256: str, size: int, ttl: int, base_url: str) -> dict:
         url = self.s3.generate_presigned_url(

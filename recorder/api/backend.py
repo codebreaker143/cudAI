@@ -90,6 +90,7 @@ class CudaiBackend:
             ("/api/recordings", self.recording_controller.get_user_recordings_list),
             ("/api/recording/<recording_name>/review", self.recording_controller.get_review),
             ("/api/recording/<recording_name>/video.mp4", self.recording_controller.stream_video),
+            ("/api/recording/<recording_name>/timings", self.recording_controller.get_timings),
             ("/api/recording/<recording_name>/task", self.recording_controller.update_task, {"methods": ["POST"]}),
             # Recording Operations
             ("/api/recording/<recording_name>/confirm", self.recording_controller.confirm_recording, {"methods": ["POST"]}),

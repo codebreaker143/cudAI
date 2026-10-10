@@ -269,7 +269,8 @@ def test_unredacted_chunks_are_never_uploaded(tmp_path, configured):
     finish(rec)
     manager.recording_processed(str(rec))
     manager.tick()
-    assert upload.recording_upload_status(str(rec))["state"] in ("waiting", "uploading")
+    status = upload.recording_upload_status(str(rec))
+    assert status == {"state": "redacting", "bytes": status["bytes"], "done": 0, "total": 2}
 
     # The masked copy is what reaches the server, under the chunk's path.
     mark_redacted(rec, parts[0], masked_bytes=b"masked video")

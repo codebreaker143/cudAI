@@ -245,25 +245,28 @@ def find_spans(text: str) -> list:
     return list(_spans(text))
 
 
-def redact_text(text, counts: Counter | None = None):
-    """Replace sensitive values in `text` with [ENTITY] placeholders."""
-    if not isinstance(text, str):
-        return text
-    text = _LEGACY_RE.sub(lambda m: f"[{_LEGACY[m.group(1)]}]", text)
-    spans = find_spans(text)
-    for start, end, entity in reversed(spans):
+def replace_spans(text: str, spans: list, counts: Counter | None = None) -> str:
+    for start, end, entity in sorted(spans, reverse=True):
         text = text[:start] + f"[{entity}]" + text[end:]
         if counts is not None:
             counts[entity] += 1
     return text
 
 
-def redact_tree(obj, counts: Counter | None = None):
+def redact_text(text, counts: Counter | None = None, find=find_spans):
+    """Replace sensitive values in `text` with [ENTITY] placeholders."""
+    if not isinstance(text, str):
+        return text
+    text = _LEGACY_RE.sub(lambda m: f"[{_LEGACY[m.group(1)]}]", text)
+    return replace_spans(text, find(text) if text else [], counts)
+
+
+def redact_tree(obj, counts: Counter | None = None, find=find_spans):
     """redact_text on every string inside nested dicts/lists (keys kept)."""
     if isinstance(obj, str):
-        return redact_text(obj, counts)
+        return redact_text(obj, counts, find)
     if isinstance(obj, list):
-        return [redact_tree(v, counts) for v in obj]
+        return [redact_tree(v, counts, find) for v in obj]
     if isinstance(obj, dict):
-        return {k: redact_tree(v, counts) for k, v in obj.items()}
+        return {k: redact_tree(v, counts, find) for k, v in obj.items()}
     return obj

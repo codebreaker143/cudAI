@@ -33,7 +33,7 @@ from dataclasses import dataclass
 import cv2
 import numpy as np
 
-from .engine import find_spans, redact_text
+from .engine import find_spans, replace_spans
 
 
 @dataclass
@@ -182,11 +182,13 @@ def redact_video(
     fps: int = 30,
     settings: Settings | None = None,
     on_timing=None,
+    find=find_spans,
 ) -> dict:
     """
     Mask sensitive text in `src`. Writes `dst` only if something was masked.
     Returns {"masked", "frames", "ocr_frames", "entities", "layer": [...]}.
-    `on_timing(stage, seconds, **extra)` receives per-step durations.
+    `on_timing(stage, seconds, **extra)` receives per-step durations; `find`
+    is the text detector (Presidio rules by default).
     """
     settings = settings or Settings()
     timing = Counter()
@@ -222,7 +224,7 @@ def redact_video(
         t = time.perf_counter()
         for _, found in crops:
             for line in group_rows(found):
-                line["spans"] = find_spans(line["text"])
+                line["spans"] = find(line["text"])
                 lines.append(line)
         timing["presidio"] += time.perf_counter() - t
         pii = [b for ln in lines if ln["spans"] for b in span_boxes(ln, ln["spans"], settings.box_pad)]
@@ -280,7 +282,7 @@ def redact_video(
             ],
             "lines": [
                 {"bbox": [int(ln["box"][0] * sx), int(ln["box"][1] * sy), int(ln["box"][2] * sx), int(ln["box"][3] * sy)],
-                 "text": redact_text(ln["text"]), "score": round(ln["score"], 3)}
+                 "text": replace_spans(ln["text"], ln["spans"]), "score": round(ln["score"], 3)}
                 for ln in e["lines"]
             ],
             "masks": [

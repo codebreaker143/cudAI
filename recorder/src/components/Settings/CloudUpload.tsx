@@ -98,6 +98,20 @@ export default function CloudUploadCard() {
                         Last upload: {formatDate(new Date(status.last_upload_at * 1000).toISOString())}
                     </p>
                 )}
+                {status?.redaction && (
+                    <p className="text-zinc-500 dark:text-zinc-400">
+                        On-device redaction:{" "}
+                        {status.redaction.backlog
+                            ? `${status.redaction.backlog} chunk${status.redaction.backlog > 1 ? "s" : ""} waiting`
+                            : "up to date"}
+                        {status.redaction.last_seconds != null &&
+                            ` · last chunk took ${status.redaction.last_seconds} s`}
+                        {status.last_lag_seconds != null && ` · ${status.last_lag_seconds} s behind live`}
+                    </p>
+                )}
+                {status?.redaction?.last_error && (
+                    <p className="break-all text-red-600">Redaction: {status.redaction.last_error}</p>
+                )}
                 {status?.last_error && status.state !== "idle" && (
                     <p className="break-all text-red-600">{status.last_error}</p>
                 )}

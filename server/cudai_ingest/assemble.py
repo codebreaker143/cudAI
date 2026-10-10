@@ -1,10 +1,12 @@
 """
 Rebuild a recording's videos from its uploaded parts.
 
-The app uploads each display's 10-second chunks and pause-gap clips, and
-metadata.json lists them in order (displays[].video.parts). Joining them
-with FFmpeg's concat demuxer (stream copy, no re-encoding) gives exactly the
-contributor's local video.mp4 / video_display_N.mp4.
+The app uploads each display's 10-second chunks (redacted on the device)
+and pause-gap clips, and metadata.json lists them in order
+(displays[].video.parts). Videos are rebuilt from clean/ (after the
+server's name removal), never from the raw uploads. Parts all encoded on the
+device join with stream copy; if the server re-encoded some, the join is
+re-encoded so the result decodes cleanly.
 
 Usage: python -m cudai_ingest.assemble <recording id> <output dir>
 (storage is configured with the same environment as the server)
@@ -25,9 +27,11 @@ def _videos(metadata: dict) -> list:
     return videos or [metadata["video"]]
 
 
-def assemble(storage, recording_id: str, out_dir: str, ffmpeg: str = "ffmpeg") -> list:
+def assemble(storage, recording_id: str, out_dir: str, ffmpeg: str = "ffmpeg", prefix: str = "clean") -> list:
     """Write every display's video to out_dir; returns the file paths."""
-    prefix = f"recordings/{recording_id}/"
+    info = storage.read_json(f"{prefix}/{recording_id}/_clean.json") or {}
+    mixed = "server" in (info.get("encoders") or {}).values()
+    prefix = f"{prefix}/{recording_id}/"
     metadata = storage.read_json(prefix + "metadata.json")
     if metadata is None:
         raise FileNotFoundError(f"{recording_id}: metadata.json not uploaded yet")
@@ -50,9 +54,11 @@ def assemble(storage, recording_id: str, out_dir: str, ffmpeg: str = "ffmpeg") -
                 list_path = os.path.join(work, "concat.txt")
                 with open(list_path, "w") as f:
                     f.writelines(f"file '{p}'\n" for p in local)
+                codec = (["-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p"]
+                         if mixed else ["-c", "copy"])
                 result = subprocess.run(
                     [ffmpeg, "-y", "-v", "error", "-f", "concat", "-safe", "0", "-i", list_path,
-                     "-c", "copy", "-movflags", "+faststart", output],
+                     *codec, "-movflags", "+faststart", output],
                     capture_output=True, text=True,
                 )
                 if result.returncode != 0:

@@ -15,11 +15,12 @@ from datetime import datetime, timezone
 
 from .utils import get_app_data_dir
 
-CONSENT_VERSION = "2026-10-10.2"
+CONSENT_VERSION = "2026-10-10.3"
 
-# First terms version under which recordings are uploaded to cudAI's cloud.
-# Recordings made under earlier (local-only) terms are never uploaded.
-CLOUD_UPLOAD_CONSENT_VERSION = "2026-10-10.2"
+# First terms version under which recordings are uploaded to cudAI's cloud, with
+# on-device video redaction.
+# Recordings made under earlier terms are never uploaded.
+CLOUD_UPLOAD_CONSENT_VERSION = "2026-10-10.3"
 
 
 def _consent_path() -> str:

@@ -38,6 +38,14 @@ export function UploadBadge({ upload }: { upload?: RecordingUpload }) {
                     <Spinner className="h-3 w-3" /> Uploading
                 </Badge>
             );
+        case "redacting":
+            return (
+                <span title="Sensitive text is being masked on this Mac before upload.">
+                    <Badge tone="sky">
+                        <Spinner className="h-3 w-3" /> Redacting {upload.done}/{upload.total}
+                    </Badge>
+                </span>
+            );
         case "waiting":
             return <Badge tone="amber">Waiting to upload</Badge>;
         case "error":

@@ -171,8 +171,9 @@ def test_live_upload_and_server_rebuild(tmp_path, monkeypatch):
     folder = os.path.join(RECORDING_DIR, name)
     first_chunk = f"recordings/{name}/chunks/display_0/segment_000/chunk_00000.mp4"
 
-    # The first 10-second chunk reaches the server while still recording.
-    deadline = time.time() + 20
+    # The first 10-second chunk is redacted on this Mac and reaches the server
+    # while still recording.
+    deadline = time.time() + 60
     while storage.sha256(first_chunk) is None and time.time() < deadline:
         time.sleep(0.5)
     assert storage.sha256(first_chunk), "first chunk was not uploaded during recording"
@@ -194,8 +195,15 @@ def test_live_upload_and_server_rebuild(tmp_path, monkeypatch):
     assert record.get("status") == "complete", record
     assert not os.path.exists(os.path.join(folder, "chunks"))
     assert storage.sha256(f"recordings/{name}/live/events/000001.jsonl")
+    assert storage.sha256(f"recordings/{name}/ocr/chunks/display_0/segment_000/chunk_00000.mp4.jsonl")
+    from core import timing
+    stages = timing.summary(folder)["stages"]
+    for stage in ("capture_start", "ocr", "presidio", "redact_chunk", "upload_file", "finalize_video",
+                  "process_recording"):
+        assert stages.get(stage, {}).get("count"), stage
+    assert timing.summary(folder)["chunk_lag"]["count"] >= 1
 
-    (rebuilt,) = assemble(storage, name, str(tmp_path / "rebuilt"), ffmpeg=get_ffmpeg_path())
+    (rebuilt,) = assemble(storage, name, str(tmp_path / "rebuilt"), ffmpeg=get_ffmpeg_path(), prefix="recordings")
     local = os.path.join(folder, "video.mp4")
     assert _frames(rebuilt) == _frames(local)
     metadata = json.load(open(os.path.join(folder, "metadata.json")))

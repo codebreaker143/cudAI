@@ -1,0 +1,9 @@
+# Second-pass worker (Linux GPU server): names (GLiNER), OCR (PaddleOCR), masking (OpenCV)
+# Also needs a full FFmpeg build with libx264 on PATH (or CUDAI_FFMPEG).
+-r requirements.txt
+# PaddlePaddle GPU wheels come from Paddle's index (CUDA 12.6 build).
+--extra-index-url https://www.paddlepaddle.org.cn/packages/stable/cu126/
+paddlepaddle-gpu==3.0.0
+paddleocr>=3.0,<4
+gliner==0.2.29
+opencv-python-headless==4.10.0.84

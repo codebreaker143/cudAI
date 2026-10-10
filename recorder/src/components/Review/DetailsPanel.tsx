@@ -1,6 +1,6 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { DocumentDuplicateIcon, FolderOpenIcon } from "@heroicons/react/20/solid";
-import { ReviewData } from "../../lib/api";
+import { api, PipelineTimings, ReviewData } from "../../lib/api";
 import { formatDate, formatDuration } from "../../lib/format";
 import { Badge, Button } from "../ui";
 import { useMain } from "../../context/MainContext";
@@ -22,6 +22,77 @@ function Row({ label, value }: { label: string; value: React.ReactNode }) {
             <dt className="text-zinc-500 dark:text-zinc-400">{label}</dt>
             <dd className="min-w-0 break-words text-zinc-800 dark:text-zinc-200">{value ?? "—"}</dd>
         </div>
+    );
+}
+
+// Display names for pipeline stages (core/timing.py), in pipeline order.
+const STAGES: [string, string][] = [
+    ["capture_start", "Capture start"],
+    ["redaction_queue_wait", "Wait for redaction"],
+    ["decode", "Decode"],
+    ["change_detection", "Change detection"],
+    ["ocr", "OCR"],
+    ["presidio", "Presidio"],
+    ["mask", "Masking (OpenCV)"],
+    ["encode", "Re-encode"],
+    ["redact_chunk", "Redaction per chunk"],
+    ["upload_file", "Upload per file"],
+    ["live_events", "Live event upload"],
+    ["capture_stop", "Capture stop"],
+    ["stop_recording", "Stop recording"],
+    ["finalize_video", "Join video"],
+    ["privacy_text", "Text redaction"],
+    ["reduce_actions", "Action extraction"],
+    ["export", "Export"],
+    ["process_recording", "Processing total"],
+    ["final_upload", "Final upload"],
+];
+
+function PipelineTiming({ recordingId }: { recordingId: string }) {
+    const [timings, setTimings] = useState<PipelineTimings | null>(null);
+    useEffect(() => {
+        api.get<PipelineTimings>(`/api/recording/${recordingId}/timings`).then(setTimings).catch(() => undefined);
+    }, [recordingId]);
+    if (!timings || !Object.keys(timings.stages).length) return null;
+    const fmt = (v?: number) => (v == null ? "—" : v < 1 ? `${Math.round(v * 1000)} ms` : `${v.toFixed(1)} s`);
+    const rows = STAGES.filter(([key]) => timings.stages[key]?.count);
+    return (
+        <section className="px-5 py-4">
+            <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                Pipeline timing
+            </h3>
+            {timings.chunk_lag.count > 0 && (
+                <p className="mb-2 text-sm text-zinc-700 dark:text-zinc-300">
+                    Capture → cloud: median {fmt(timings.chunk_lag.p50)}, worst {fmt(timings.chunk_lag.max)} over{" "}
+                    {timings.chunk_lag.count} chunks
+                </p>
+            )}
+            <table className="w-full text-xs tabular-nums">
+                <thead className="text-zinc-500 dark:text-zinc-400">
+                    <tr>
+                        <th className="py-1 text-left font-medium">Step</th>
+                        <th className="py-1 text-right font-medium">Runs</th>
+                        <th className="py-1 text-right font-medium">Median</th>
+                        <th className="py-1 text-right font-medium">p95</th>
+                        <th className="py-1 text-right font-medium">Total</th>
+                    </tr>
+                </thead>
+                <tbody className="text-zinc-800 dark:text-zinc-200">
+                    {rows.map(([key, label]) => {
+                        const s = timings.stages[key];
+                        return (
+                            <tr key={key}>
+                                <td className="py-0.5">{label}</td>
+                                <td className="py-0.5 text-right">{s.count}</td>
+                                <td className="py-0.5 text-right">{fmt(s.p50)}</td>
+                                <td className="py-0.5 text-right">{fmt(s.p95)}</td>
+                                <td className="py-0.5 text-right">{fmt(s.total)}</td>
+                            </tr>
+                        );
+                    })}
+                </tbody>
+            </table>
+        </section>
     );
 }
 
@@ -132,6 +203,8 @@ export default function DetailsPanel({ data }: { data: ReviewData }) {
                     value={m.contributor_id && <span className="font-mono text-xs">{m.contributor_id}</span>}
                 />
             </Section>
+
+            <PipelineTiming recordingId={data.recording_id} />
         </div>
     );
 }

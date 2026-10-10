@@ -198,6 +198,11 @@ def worker_main() -> None:
     # goes to stderr so it cannot corrupt the protocol.
     replies = os.fdopen(os.dup(1), "w", buffering=1)
     os.dup2(2, 1)
+    # `kill -USR1 <pid>` prints every thread's stack to stderr (diagnostics).
+    import faulthandler
+    import signal
+
+    faulthandler.register(signal.SIGUSR1, all_threads=True)
     try:
         os.nice(10)
     except OSError:
