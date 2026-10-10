@@ -183,7 +183,12 @@ class MetadataManager:
     def set_display_videos(self, videos: list):
         by_index = {v["display_index"]: v for v in videos}
         for display in self.metadata.get("displays", []):
-            display["video"] = by_index.get(display["index"])
+            video = by_index.get(display["index"])
+            if video and video.get("width") and display.get("bounds", {}).get("width"):
+                # Video pixels per screen point (2.0 for native Retina capture,
+                # 1.0 when recorded at logical resolution).
+                video["pixels_per_point"] = round(video["width"] / display["bounds"]["width"], 4)
+            display["video"] = video
 
     def set_video(self, video: dict):
         self.metadata["video"] = video

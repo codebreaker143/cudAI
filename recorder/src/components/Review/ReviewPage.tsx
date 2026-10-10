@@ -389,6 +389,7 @@ export default function ReviewPage() {
                             timeOffset={timeOffset}
                             initialTime={lastTime.current}
                             aspect={aspect}
+                            fps={data.video.fps}
                             knownDuration={shown.duration}
                             markers={markers}
                             clicks={clicks}

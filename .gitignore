@@ -198,3 +198,4 @@ ffmpeg.exe
 xcode
 # Ingest server local storage (development)
 server/data/
+.venv-*/

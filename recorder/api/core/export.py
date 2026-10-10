@@ -32,8 +32,9 @@ TIME_BASE = (
     "Input coordinates are global logical points (origin: top-left of the "
     "main display). Each pointer event's `display` is the index into "
     "`displays`; subtract that display's bounds.x/y and multiply by its "
-    "scale_factor for pixels in its video (video.mp4 for display 0, "
-    "video_display_N.mp4 otherwise)."
+    "video.pixels_per_point for pixels in its video (video.mp4 for display 0, "
+    "video_display_N.mp4 otherwise). capture_profile says which resolution, "
+    "frame rate and tier this recording used."
 )
 
 KEYBOARD_FIELDS = ("name", "char", "text", "modifiers", "vk")
@@ -177,6 +178,7 @@ def write_export(recording_path: str) -> dict | None:
             "consent": metadata.get("consent"),
             "privacy": _privacy_block(recording_path, metadata),
             "pipeline_timing": timing.summary(recording_path),
+            "capture_profile": metadata.get("capture_profile"),
             "start_time": metadata.get("start_time"),
             "stop_time": metadata.get("stop_time"),
             "environment": {

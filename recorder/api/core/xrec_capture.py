@@ -10,7 +10,7 @@ from . import timing
 from .displays import chunks_dir_name, segments_dir_name, video_file_name
 from .logger import logger
 from .utils import (
-    KEYFRAME_INTERVAL,
+    KEYFRAME_SECONDS,
     VIDEO_FPS,
     get_ffmpeg_path,
     h264_encoder_args,
@@ -116,6 +116,7 @@ class XrecCapture:
         fps: int = VIDEO_FPS,
         display_index: int = 0,
         screen_device: str | None = None,
+        output_size: tuple | None = None,
     ):
         self.recording_path = recording_path
         self.display_index = display_index
@@ -124,6 +125,9 @@ class XrecCapture:
         self.output_name = video_file_name(display_index)
         self.fps = fps
         self.screen_device = screen_device
+        # (width, height) to scale to, e.g. logical points instead of Retina
+        # pixels on lower-end Macs; None records native pixels.
+        self.output_size = output_size
         self.process = None
         self.log_file = None
         self._pending = None
@@ -168,12 +172,14 @@ class XrecCapture:
             "-capture_mouse_clicks", "1",
             "-pixel_format", "nv12",
             "-i", f"{screen_device}:none",
-            *h264_encoder_args(realtime=True),
+            *(["-vf", f"scale={self.output_size[0]}:{self.output_size[1]}:flags=area"]
+              if self.output_size else []),
+            *h264_encoder_args(realtime=True, fps=self.fps),
             # Constant frame rate: frame n is exactly at start + n / fps.
             "-fps_mode", "cfr",
             "-r", str(self.fps),
             # Keyframes exactly every 2 s, so chunks split exactly at 10 s.
-            "-force_key_frames", f"expr:gte(t,n_forced*{KEYFRAME_INTERVAL / self.fps:g})",
+            "-force_key_frames", f"expr:gte(t,n_forced*{KEYFRAME_SECONDS})",
             "-f", "segment",
             "-segment_time", str(CHUNK_SECONDS),
             "-reset_timestamps", "1",
@@ -550,7 +556,7 @@ class XrecCapture:
                 "-f", "lavfi",
                 "-i", f"color=c=black:s={width}x{height}:r={self.fps}",
                 "-frames:v", str(frames),
-                *h264_encoder_args(),
+                *h264_encoder_args(fps=self.fps),
                 path,
             ]
         )
@@ -577,11 +583,19 @@ class XrecCapture:
             ["-y", "-f", "concat", "-safe", "0", "-i", list_path,
              "-vf", f"scale={width}:{height}",
              "-fps_mode", "cfr", "-r", str(self.fps),
-             *h264_encoder_args(),
+             *h264_encoder_args(fps=self.fps),
              "-movflags", "+faststart", output_path]
         )
         if result.returncode != 0:
             raise RuntimeError(f"Failed to join video segments: {result.stderr[-500:]}")
+
+
+def logical_size(display: dict) -> tuple | None:
+    """The display's size in points (even numbers), if smaller than its pixels."""
+    if (display.get("scale_factor") or 1) <= 1:
+        return None
+    bounds = display["bounds"]
+    return int(bounds["width"]) // 2 * 2, int(bounds["height"]) // 2 * 2
 
 
 def find_screen_devices() -> dict:
@@ -599,7 +613,7 @@ class MultiCapture:
     display is display 0 and keeps the file name video.mp4.
     """
 
-    def __init__(self, recording_path: str, displays: list, fps: int = VIDEO_FPS):
+    def __init__(self, recording_path: str, displays: list, fps: int = VIDEO_FPS, scale: str = "native"):
         devices = find_screen_devices()
         self.captures = []
         for display in displays:
@@ -608,7 +622,8 @@ class MultiCapture:
                 logger.warning(f"MultiCapture: no capture device for display {display['index']}")
                 continue
             self.captures.append(
-                XrecCapture(recording_path, fps, display["index"], screen_device=device)
+                XrecCapture(recording_path, fps, display["index"], screen_device=device,
+                            output_size=logical_size(display) if scale == "logical" else None)
             )
         if not self.captures:
             raise RuntimeError("cudAI could not find a screen capture device.")

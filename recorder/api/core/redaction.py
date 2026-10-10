@@ -123,7 +123,37 @@ class RapidOcr:
             "Global.use_cls": False,  # screen text is upright
             "Global.log_level": "warning",
             "EngineConfig.onnxruntime.intra_op_num_threads": threads,
+            "Rec.rec_batch_num": 16,
+            # Screen text is detectable at its own size. The default enlarges
+            # images to a 736 px short side, which made thin strips and small
+            # crops up to 60x slower to scan (and only sometimes caught tiny
+            # print; see docs/STATUS.md, known limitations).
+            "Det.limit_type": "max",
+            "Det.limit_side_len": 2000,
         })
+
+    MIN_SCORE = 0.5  # RapidOCR's default text_score
+
+    def detect(self, image) -> list:
+        """Text line boxes (x0, y0, x1, y1)."""
+        if image.shape[0] < 8 or image.shape[1] < 8:
+            return []
+        result = self.engine._load_det_model()(image)
+        if result.boxes is None:
+            return []
+        return [(float(p[:, 0].min()), float(p[:, 1].min()), float(p[:, 0].max()), float(p[:, 1].max()))
+                for p in result.boxes]
+
+    def recognize(self, crops: list) -> list:
+        """(text, score) per line image; low-confidence text becomes ""."""
+        from rapidocr.ch_ppocr_rec import TextRecInput
+
+        crops = [c for c in crops]
+        if not crops:
+            return []
+        result = self.engine._load_rec_model()(TextRecInput(img=crops))
+        return [(text if score >= self.MIN_SCORE else "", float(score))
+                for text, score in zip(result.txts, result.scores)]
 
     def __call__(self, image) -> list:
         if image.shape[0] < 8 or image.shape[1] < 8:
@@ -138,11 +168,26 @@ class RapidOcr:
         return lines
 
 
+def settings_for(recording_path: str, fps: int):
+    """Redaction settings from the recording's capture profile."""
+    from cudai_privacy.video import Settings
+
+    try:
+        with open(os.path.join(recording_path, "metadata.json"), "r", encoding="utf-8") as f:
+            profile = json.load(f).get("capture_profile") or {}
+    except (OSError, ValueError):
+        profile = {}
+    return Settings(
+        analysis_max_side=profile.get("analysis_max_side", Settings.analysis_max_side),
+        min_ocr_interval=max(1, round(profile.get("min_ocr_interval_seconds", 0.5) * fps)),
+    )
+
+
 def redact_chunk(recording_path: str, part: str, ocr) -> dict:
     """Redact one chunk; writes the outputs above and returns the result."""
-    from cudai_privacy.video import redact_video
+    from cudai_privacy.video import probe_video, redact_video
 
-    from .utils import VIDEO_FPS, get_ffmpeg_path, h264_encoder_args
+    from .utils import get_ffmpeg_path, h264_encoder_args
 
     src = os.path.join(recording_path, part)
     redacted_rel = f"redacted/{part}"
@@ -154,9 +199,10 @@ def redact_chunk(recording_path: str, part: str, ocr) -> dict:
         end = time.time()
         timing.record(recording_path, stage, end - seconds, end, chunk=part, **extra)
 
+    fps = probe_video(get_ffmpeg_path(), src)[2]
     with timing.stage(recording_path, "redact_chunk", chunk=part) as info:
-        result = redact_video(src, tmp, ocr, get_ffmpeg_path(), h264_encoder_args(),
-                              fps=VIDEO_FPS, on_timing=on_timing)
+        result = redact_video(src, tmp, ocr, get_ffmpeg_path(), h264_encoder_args(fps=fps), fps=fps,
+                              settings=settings_for(recording_path, fps), on_timing=on_timing)
         info.update(masked=result["masked"], ocr_frames=result["ocr_frames"], entities=result["entities"])
     if result["masked"]:
         os.replace(tmp, dst)
@@ -185,11 +231,11 @@ def redact_chunk(recording_path: str, part: str, ocr) -> dict:
 
 # Worker process ----------------------------------------------------------------
 
-def worker_command() -> list:
+def worker_command(threads: int = OCR_THREADS) -> list:
     if getattr(sys, "frozen", False):  # packaged app: the backend binary itself
-        return [sys.executable, "--redaction-worker"]
+        return [sys.executable, "--redaction-worker", str(threads)]
     backend = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "backend.py")
-    return [sys.executable, backend, "--redaction-worker"]
+    return [sys.executable, backend, "--redaction-worker", str(threads)]
 
 
 def worker_main() -> None:
@@ -207,7 +253,8 @@ def worker_main() -> None:
         os.nice(10)
     except OSError:
         pass
-    ocr = RapidOcr()
+    args = sys.argv[sys.argv.index("--redaction-worker") + 1:]
+    ocr = RapidOcr(threads=int(args[0]) if args and args[0].isdigit() else OCR_THREADS)
     for line in sys.stdin:
         try:
             job = json.loads(line)
@@ -222,11 +269,15 @@ class RedactionWorker:
 
     def __init__(self):
         self.process = None
+        self.threads = None
 
-    def run(self, recording_path: str, part: str) -> dict:
+    def run(self, recording_path: str, part: str, threads: int = OCR_THREADS) -> dict:
+        if self.process is not None and self.threads != threads:
+            self.stop()  # e.g. unplugged from power: restart with fewer threads
         if self.process is None or self.process.poll() is not None:
+            self.threads = threads
             self.process = subprocess.Popen(
-                worker_command(), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                worker_command(threads), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                 stderr=subprocess.DEVNULL, text=True, bufsize=1,
             )
         try:
@@ -261,6 +312,7 @@ class RedactionManager(threading.Thread):
     """
 
     POLL_SECONDS = 1.0
+    IDLE_STOP_SECONDS = 300  # free the OCR worker's memory when idle
 
     def __init__(self, upload_manager, recordings_dir: str | None = None, worker=None):
         super().__init__(daemon=True, name="cudai-redaction")
@@ -273,6 +325,7 @@ class RedactionManager(threading.Thread):
         self._attempts = {}
         self._done = set()  # finished recordings with every chunk redacted
         self._stopped = False
+        self._idle_since = time.monotonic()
         self.status = {"backlog": 0, "current": None, "last_seconds": None, "last_error": None}
 
     def stop(self) -> None:
@@ -332,15 +385,23 @@ class RedactionManager(threading.Thread):
 
     def step(self) -> bool:
         """Redact the next pending chunk. False when there was nothing to do."""
+        from . import device_profile
+
         jobs = self.pending()
         if not jobs:
             self.status["current"] = None
+            if time.monotonic() - self._idle_since > self.IDLE_STOP_SECONDS:
+                self.worker.stop()
             return False
+        self._idle_since = time.monotonic()
+        # Far behind live: record it so the next recording uses a lighter profile.
+        device_profile.report_backlog(len(jobs) * 10)
         recording, part = job = jobs[0]
         self.status["current"] = part
         started = time.time()
         timing.record(recording, "redaction_queue_wait", self._first_seen.pop(job, started), started, chunk=part)
-        reply = self.worker.run(recording, part)
+        threads = device_profile.current()["ocr_threads"]
+        reply = self.worker.run(recording, part, threads)
         self.status["last_seconds"] = round(time.time() - started, 2)
         if reply.get("ok"):
             self._attempts.pop(job, None)

@@ -24,7 +24,7 @@ from .utils import (
 )
 from .a11y_listener import A11yListener
 from .axtree_getter import KeyFrameDetector
-from . import timing
+from . import device_profile, timing
 from .logger import logger
 
 _STOP = object()
@@ -80,7 +80,12 @@ class Recorder(Thread):
         )
         self.displays = list_displays()
         self.metadata_manager.set_displays(self.displays)
-        self.capture_client = MultiCapture(self.recording_path, self.displays)
+        # Resolution, frame rate and background work suited to this Mac.
+        self.profile = device_profile.current(consume_downgrade=True)
+        self.metadata_manager.metadata["capture_profile"] = self.profile
+        self.capture_client = MultiCapture(
+            self.recording_path, self.displays, fps=self.profile["fps"], scale=self.profile["capture_scale"]
+        )
 
         self.mouse_listener = mouse.Listener(
             on_move=self.on_move, on_click=self.on_click, on_scroll=self.on_scroll
@@ -91,7 +96,12 @@ class Recorder(Thread):
 
         # The a11y listener also tracks the active app/window.
         self.a11y_listener = (
-            A11yListener(generate_window_a11y, generate_element_a11y)
+            A11yListener(
+                generate_window_a11y,
+                generate_element_a11y,
+                poll_interval=self.profile["window_poll_seconds"],
+                url_interval=self.profile["url_poll_seconds"],
+            )
             if self.use_a11y
             else None
         )

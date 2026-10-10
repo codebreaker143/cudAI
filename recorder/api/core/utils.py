@@ -245,12 +245,12 @@ def get_ffmpeg_path() -> str:
     return str(Path(__file__).resolve().parents[1] / exe)
 
 
-VIDEO_FPS = 30
+VIDEO_FPS = 30  # default; low-end Macs record at 15 (core/device_profile.py)
 # Keyframe interval: every 2 s, so fixed-length chunks can start on a keyframe.
-KEYFRAME_INTERVAL = 2 * VIDEO_FPS
+KEYFRAME_SECONDS = 2  # 10-second chunks split exactly on keyframes
 
 
-def h264_encoder_args(realtime: bool = False) -> List[str]:
+def h264_encoder_args(realtime: bool = False, fps: int = VIDEO_FPS) -> List[str]:
     """
     H.264 encoder settings shared by capture, pause-gap clips and cuts (they
     must match for stream-copy joins).
@@ -272,7 +272,7 @@ def h264_encoder_args(realtime: bool = False) -> List[str]:
     else:
         # TODO(windows): use h264_mf (Media Foundation) in the LGPL build.
         args = ["-c:v", "libx264", "-preset", "ultrafast"]
-    return args + ["-g", str(KEYFRAME_INTERVAL), "-pix_fmt", "yuv420p"]
+    return args + ["-g", str(KEYFRAME_SECONDS * fps), "-pix_fmt", "yuv420p"]
 
 
 def run_ffmpeg(args: List[str], **kwargs) -> subprocess.CompletedProcess:

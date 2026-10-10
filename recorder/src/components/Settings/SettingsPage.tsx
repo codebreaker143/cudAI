@@ -7,6 +7,7 @@ import { useMain } from "../../context/MainContext";
 import TermsAndConsent from "../prerequisite/Terms";
 import { PermissionList, usePermissions } from "../prerequisite/Permissions";
 import CloudUploadCard from "./CloudUpload";
+import PerformanceCard from "./PerformanceCard";
 
 interface SystemInfo {
     version: string;
@@ -100,6 +101,8 @@ export default function SettingsPage() {
                 </Card>
 
                 <CloudUploadCard />
+
+                <PerformanceCard />
 
                 <Card>
                     <h2 className="border-b border-zinc-100 px-5 py-3 text-sm font-semibold text-zinc-900 dark:border-zinc-800 dark:text-zinc-100">

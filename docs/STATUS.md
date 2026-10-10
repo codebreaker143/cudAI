@@ -40,6 +40,13 @@ models that operate computers.
   after 72 h; QA tool for human spot checks of the name miss rate.
 - **Pipeline timing:** every step from capture to cloud is timed and shown in
   the review screen.
+- **Adapts to the Mac:** three recording tiers chosen from the hardware
+  (native resolution on Pro/Max chips; screen resolution on base chips;
+  screen resolution at 15 fps on Intel/8 GB), lighter on battery, one tier
+  down after a redaction backlog; overridable in Settings.
+- **Efficient redaction:** text already on screen is not read again, changed
+  areas are read as full-width strips, and scrolled lines are recognised
+  wherever they move to.
 - **Consent and integrity:** mandatory, versioned consent stored with each
   recording; no in-app deletion; raw files locked after processing.
 - **Licensing:** LGPL-only FFmpeg with Apple's hardware encoder; no GPL
@@ -68,6 +75,23 @@ models that operate computers.
   number masked from the frame they appear, business data (PO and invoice
   numbers) kept.
 
+## Performance (native Apple Silicon build, M3 Pro limited to 2 OCR threads)
+
+Five representative 10-second chunks from real recordings (scrolling,
+typing, app switching, an idle screen, a synthetic PII screen): 50 s of
+video.
+
+| | Redaction time | CPU time | vs live |
+|---|---|---|---|
+| Before | 71.1 s | 147 s | 1.4× slower than live |
+| Now, native resolution | 44.0 s | 96 s (−35%) | keeps up |
+| Now, light tier (screen resolution, 15 fps) | 32.3 s | 63 s (−57%) | keeps up |
+
+Scrolling chunk: 23.4 s → 13.8 s. Detection of thin strips: 1,964 ms →
+31 ms. Rejected after measuring: int8-quantised OCR models (13% faster but
+read only 54–63% of lines identically) and PP-OCRv5 English models (slower).
+Earlier figures measured on battery at 1% were throttled and are not used.
+
 ## Open items, in priority order
 
 1. **Deploy the ingest server** (pick AWS S3, Cloudflare R2 or GCS; HTTPS
@@ -89,8 +113,8 @@ models that operate computers.
 
 - **Server second pass on a GPU machine.** Tested with the app's CPU OCR and a
   stub name detector; real GLiNER and GPU PaddleOCR have not run yet.
-- **On-device redaction speed on a native arm64 build** (expected faster than
-  the Rosetta numbers above).
+- **Capture CPU per tier and a real recording at the light tier** (screen
+  was locked during this round of measurements).
 - **Multi-display capture on real hardware.** It is implemented and
   unit-tested, but needs a second, non-mirrored monitor. Run:
   `CUDAI_E2E=1 python -m pytest tests/test_e2e_recording.py` (from
@@ -103,8 +127,13 @@ models that operate computers.
   or stylised text, and images of documents can be missed. People's names
   are only removed on the server. Contributors are told to pause for private
   information.
-- On-device OCR is CPU-heavy: during busy screen activity redaction falls
-  behind live (about 2× real time under Rosetta) and uploads catch up later.
+- On-device OCR is CPU-heavy: with 2 threads it keeps up with live on the
+  sample set, but long bursts of scrolling or app switching on slower Macs
+  can fall behind; uploads then catch up later (never unredacted).
+- Very small print (status-bar clocks, chat timestamps, widget text) is often
+  not read by OCR at the recording's analysis resolution, so it cannot be
+  masked if it contains a sensitive value. The server's second pass (larger
+  models) is the backstop; spot checks measure what gets through.
 - Redaction is pattern-based. Any 10-digit number starting with 6–9 is
   treated as a phone number, and detection can miss unusual formats, so a
   human or legal review before sale is still advised.

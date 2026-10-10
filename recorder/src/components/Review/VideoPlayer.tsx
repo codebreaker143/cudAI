@@ -64,6 +64,7 @@ interface Props {
     /** Shared-timeline position to open at. */
     initialTime?: number;
     aspect: number; // width / height
+    fps?: number; // frame rate, for frame stepping
     knownDuration?: number | null;
     markers: TimelineMarker[];
     clicks: ClickMark[];
@@ -79,6 +80,7 @@ const VideoPlayer = forwardRef<VideoPlayerHandle, Props>(function VideoPlayer(
         timeOffset = 0,
         initialTime = 0,
         aspect,
+        fps = 30,
         knownDuration,
         markers,
         clicks,
@@ -174,7 +176,7 @@ const VideoPlayer = forwardRef<VideoPlayerHandle, Props>(function VideoPlayer(
             if (target.closest("input, textarea, select, [contenteditable=true]")) return;
             const video = videoRef.current;
             if (!video) return;
-            const frame = 1 / 30;
+            const frame = 1 / fps;
             switch (e.key) {
                 case " ":
                 case "k":
@@ -211,7 +213,7 @@ const VideoPlayer = forwardRef<VideoPlayerHandle, Props>(function VideoPlayer(
         };
         window.addEventListener("keydown", onKey);
         return () => window.removeEventListener("keydown", onKey);
-    }, [seek, togglePlay, onPrevAction, onNextAction, timeOffset]);
+    }, [seek, togglePlay, onPrevAction, onNextAction, timeOffset, fps]);
 
     const ratioFromEvent = (clientX: number) => {
         const rect = trackRef.current!.getBoundingClientRect();

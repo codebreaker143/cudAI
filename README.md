@@ -106,10 +106,13 @@ excluded from the timeline and actions.
 ## Development
 
 Requirements: macOS 12+ (Intel or Apple Silicon), Xcode command line tools,
-Python 3.12, Node 22.
+Python 3.12 **native to the Mac's processor** (on Apple Silicon an Intel
+Python runs everything, including the packaged app, under Rosetta: about
+half the speed), Node 22.
 
 ```bash
-python -m venv .venv && source .venv/bin/activate
+uv python install 3.12 && uv venv --python 3.12 .venv-arm64   # or any arm64 Python 3.12
+source .venv-arm64/bin/activate
 pip install -r recorder/api/requirements-dev.txt
 cd recorder
 scripts/build_ffmpeg_lgpl.sh   # LGPL FFmpeg for this Mac -> api/ffmpeg
@@ -120,6 +123,15 @@ CUDAI_DEVTOOLS=1 npm start     # same, with the Chromium inspector open
 
 Grant Screen Recording, Accessibility and Input Monitoring to the app (or to
 your terminal when running from source); cudAI checks them before recording.
+
+### Performance
+
+Recording adapts to the Mac (`api/core/device_profile.py`, shown in
+Settings › Recording quality): Pro/Max chips record at native resolution,
+base M-series chips at screen resolution, and Intel or 8 GB Macs at screen
+resolution and 15 fps with lighter redaction. Measure redaction on fixed
+sample chunks with `python -m core.bench <dir of chunks> --threads 2` (from
+`recorder/api`).
 
 ### Tests
 

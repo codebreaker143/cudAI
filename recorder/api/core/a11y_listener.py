@@ -38,7 +38,12 @@ class A11yListener:
     POLL_INTERVAL = 0.2
     URL_INTERVAL = 1.0  # single-page apps change URL without changing the title
 
-    def __init__(self, generate_window_a11y, generate_element_a11y):
+    def __init__(self, generate_window_a11y, generate_element_a11y,
+                 poll_interval: float | None = None, url_interval: float | None = None):
+        if poll_interval:
+            self.POLL_INTERVAL = poll_interval
+        if url_interval:
+            self.URL_INTERVAL = url_interval
         self._element_queue = Queue()
         self.gen_element = generate_element_a11y
         self.running = False

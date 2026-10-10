@@ -21,7 +21,13 @@ redact_video(src, dst, ocr, ...) works on one video chunk:
 It also returns the OCR content layer: per OCR'd frame, every text line (with
 sensitive values replaced) and the masked boxes.
 
-`ocr(image_bgr)` returns [((x0, y0, x1, y1), text, score), ...].
+`ocr(image_bgr)` returns [((x0, y0, x1, y1), text, score), ...]. An engine
+that also has `detect(image) -> [box]` and `recognize([crops]) ->
+[(text, score)]` is used incrementally: text boxes are detected in the
+changed area, and only boxes that do not match a box already read (same
+place, or moved by the measured scroll) are recognised. Recognition is most
+of the OCR cost, so typing, scrolling and switching back to a window get
+much cheaper.
 """
 
 import re
@@ -50,14 +56,20 @@ class Settings:
 
 
 SIZE_RE = re.compile(r"Video: \w+.*?, (\d{2,5})x(\d{2,5})")
+FPS_RE = re.compile(r"Video: .*?, ([\d.]+) fps")
+
+
+def probe_video(ffmpeg: str, path: str) -> tuple:
+    """(width, height, fps) of a video."""
+    stderr = subprocess.run([ffmpeg, "-hide_banner", "-i", path], capture_output=True, text=True).stderr
+    size, fps = SIZE_RE.search(stderr), FPS_RE.search(stderr)
+    if not size:
+        raise RuntimeError(f"cannot read video size of {path}")
+    return int(size.group(1)), int(size.group(2)), round(float(fps.group(1))) if fps else 30
 
 
 def probe_size(ffmpeg: str, path: str) -> tuple:
-    stderr = subprocess.run([ffmpeg, "-hide_banner", "-i", path], capture_output=True, text=True).stderr
-    match = SIZE_RE.search(stderr)
-    if not match:
-        raise RuntimeError(f"cannot read video size of {path}")
-    return int(match.group(1)), int(match.group(2))
+    return probe_video(ffmpeg, path)[:2]
 
 
 def _frames(ffmpeg: str, path: str, width: int, height: int, pix_fmt: str, scale: tuple | None = None):
@@ -84,6 +96,111 @@ def _frames(ffmpeg: str, path: str, width: int, height: int, pix_fmt: str, scale
         err = proc.stderr.read().decode(errors="replace")
         if proc.wait() != 0:
             raise RuntimeError(f"decoding {path} failed: {err[-300:]}")
+
+
+class _LineIndex:
+    """Text boxes already recognised, findable by position (most recent first)."""
+
+    CELL = 16  # pixels
+    LIMIT = 5000
+
+    def __init__(self):
+        self.cells = {}  # (x cell, y cell) -> entries
+        self.columns = {}  # x cell -> entries, for content that scrolled
+        self.count = 0
+
+    def add(self, box, text, score, thumb):
+        entry = (box, text, score, thumb)
+        kx = int(box[0]) // self.CELL
+        self.cells.setdefault((kx, int(box[1]) // self.CELL), []).insert(0, entry)
+        self.columns.setdefault(kx, []).insert(0, entry)
+        self.count += 1
+        if self.count > self.LIMIT:
+            self.cells, self.columns, self.count = {}, {}, 0  # start over rather than track ages
+
+    def find(self, box, thumb, shift):
+        # Same place (or moved by the measured shift)...
+        for dx, dy in {shift, (0, 0)}:
+            want = (box[0] - dx, box[1] - dy, box[2] - dx, box[3] - dy)
+            kx, ky = int(want[0]) // self.CELL, int(want[1]) // self.CELL
+            for cx in (kx - 1, kx, kx + 1):
+                for cy in (ky - 1, ky, ky + 1):
+                    for entry in self.cells.get((cx, cy), ()):
+                        if _iou(want, entry[0]) >= 0.75 and _same_image(thumb, entry[3]):
+                            return entry
+        # ...or the same line anywhere in its column (scrolled any distance).
+        w, h = box[2] - box[0], box[3] - box[1]
+        kx = int(box[0]) // self.CELL
+        for cx in (kx - 1, kx, kx + 1):
+            for entry in self.columns.get(cx, ()):
+                eb = entry[0]
+                if (abs(eb[0] - box[0]) <= 4 and abs((eb[2] - eb[0]) - w) <= max(4, 0.06 * w)
+                        and abs((eb[3] - eb[1]) - h) <= max(3, 0.15 * h) and _same_image(thumb, entry[3])):
+                    return entry
+        return None
+
+
+def _iou(a, b) -> float:
+    ix = max(0.0, min(a[2], b[2]) - max(a[0], b[0]))
+    iy = max(0.0, min(a[3], b[3]) - max(a[1], b[1]))
+    inter = ix * iy
+    union = (a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - inter
+    return inter / union if union > 0 else 0.0
+
+
+def _box_thumb(gray, box):
+    x0, y0, x1, y1 = (int(v) for v in box)
+    crop = gray[max(0, y0):max(y0 + 1, y1), max(0, x0):max(x0 + 1, x1)]
+    return cv2.resize(crop, (max(4, crop.shape[1] // 2), max(4, crop.shape[0] // 2)), interpolation=cv2.INTER_AREA)
+
+
+def _same_image(a, b) -> bool:
+    """
+    Same rendered text? Video compression noise is tolerated, but any cluster
+    of strongly changed pixels (one edited character is ~1% of a line) is not,
+    so text is never reused for a line whose content changed.
+    """
+    if a.shape != b.shape:
+        a = cv2.resize(a, (b.shape[1], b.shape[0]), interpolation=cv2.INTER_AREA)
+    diff = cv2.absdiff(a, b)
+    return float(diff.mean()) <= 6.0 and float((diff > 60).mean()) <= 0.003
+
+
+def _scroll_shift(last_thumb, thumb, region, scale: float) -> tuple:
+    """How far the changed content moved (analysis pixels), e.g. a scroll."""
+    if region == "full":
+        a, b = last_thumb, thumb
+    else:
+        x0 = int(min(r[0] for r in region) * scale)
+        y0 = int(min(r[1] for r in region) * scale)
+        x1 = int(max(r[2] for r in region) * scale) + 1
+        y1 = int(max(r[3] for r in region) * scale) + 1
+        a, b = last_thumb[y0:y1, x0:x1], thumb[y0:y1, x0:x1]
+    if a.shape[0] < 8 or a.shape[1] < 8:
+        return (0, 0)
+    (dx, dy), response = cv2.phaseCorrelate(np.float32(a), np.float32(b))
+    if response < 0.2 or (abs(dx) < 0.5 and abs(dy) < 0.5):
+        return (0, 0)
+    return (round(dx / scale), round(dy / scale))
+
+
+def _bands(regions: list, width: int) -> list:
+    """Full-width horizontal bands covering the regions (overlaps merged)."""
+    bands = []
+    for _, y0, _, y1 in sorted(regions, key=lambda r: r[1]):
+        if bands and y0 <= bands[-1][3]:
+            bands[-1] = (0, bands[-1][1], width, max(bands[-1][3], y1))
+        else:
+            bands.append((0, y0, width, y1))
+    return bands
+
+
+def _covered(box, by) -> bool:
+    """Is most (>= 60%) of `box` inside `by`?"""
+    ix = max(0.0, min(box[2], by[2]) - max(box[0], by[0]))
+    iy = max(0.0, min(box[3], by[3]) - max(box[1], by[1]))
+    area = (box[2] - box[0]) * (box[3] - box[1])
+    return area > 0 and ix * iy >= 0.6 * area
 
 
 def _intersects(a, b) -> bool:
@@ -179,7 +296,7 @@ def redact_video(
     ocr,
     ffmpeg: str,
     encoder_args: list,
-    fps: int = 30,
+    fps: int | None = None,
     settings: Settings | None = None,
     on_timing=None,
     find=find_spans,
@@ -192,40 +309,98 @@ def redact_video(
     """
     settings = settings or Settings()
     timing = Counter()
-    width, height = probe_size(ffmpeg, src)
+    width, height, probed_fps = probe_video(ffmpeg, src)
+    fps = fps or probed_fps
     factor = max(1.0, max(width, height) / settings.analysis_max_side)
     aw, ah = int(width / factor) // 2 * 2, int(height / factor) // 2 * 2
     sx, sy = width / aw, height / ah
 
     lines = []  # current text on screen: dicts with box, text, spans
     events = []  # OCR results: frame, lines (copy), pii boxes, region
+    seen = _LineIndex()  # boxes already recognised (incremental engines)
+    words = []  # OCR boxes on screen now: (box, text, score, thumb)
+    incremental = hasattr(ocr, "detect") and hasattr(ocr, "recognize")
+    counts = Counter()
+
+    def read_area(frame, gray, rect, shift):
+        """OCR boxes inside rect, in frame coordinates."""
+        nonlocal words
+        x0, y0, x1, y1 = rect
+        sub = np.ascontiguousarray(frame[y0:y1, x0:x1])
+        if not incremental:
+            return [((b[0] + x0, b[1] + y0, b[2] + x0, b[3] + y0), text, score) for b, text, score in ocr(sub)]
+        # Text already on screen whose pixels did not change is kept as is.
+        inside = [w for w in words if _intersects(w[0], rect)]
+        words = [w for w in words if not _intersects(w[0], rect)]
+        kept = [w for w in inside if _same_image(_box_thumb(gray, w[0]), w[3])]
+        t = time.perf_counter()
+        boxes = [(b[0] + x0, b[1] + y0, b[2] + x0, b[3] + y0) for b in ocr.detect(sub)]
+        timing["ocr_detect"] += time.perf_counter() - t
+        # A detected box mostly covered by kept text is that text, unless it
+        # is bigger: then the text grew (typing) and the kept part is stale.
+        new_boxes = []
+        for b in boxes:
+            under = [w for w in kept if _covered(w[0], b) or _covered(b, w[0])]
+            if not under:
+                new_boxes.append(b)
+                continue
+            ux0, uy0 = min(w[0][0] for w in under), min(w[0][1] for w in under)
+            ux1, uy1 = max(w[0][2] for w in under), max(w[0][3] for w in under)
+            if b[0] < ux0 - 3 or b[2] > ux1 + 3 or b[1] < uy0 - 3 or b[3] > uy1 + 3:
+                kept = [w for w in kept if w not in under]
+                new_boxes.append(b)
+        boxes = new_boxes
+        found = [(w[0], w[1], w[2]) for w in kept]
+        words += kept
+        todo = []
+        counts["reused"] += len(kept)
+        for box in boxes:
+            thumb = _box_thumb(gray, box)
+            hit = seen.find(box, thumb, shift)
+            if hit is not None:
+                found.append((box, hit[1], hit[2]))
+                words.append((box, hit[1], hit[2], thumb))
+                if _iou(box, hit[0]) < 0.95:  # moved (scrolled): remember the new place
+                    seen.add(box, hit[1], hit[2], thumb)
+            else:
+                todo.append((box, thumb))
+        counts["reused"] += len(found)
+        counts["recognised"] += len(todo)
+        if todo:
+            t = time.perf_counter()
+            crops = [np.ascontiguousarray(frame[int(b[1]):int(b[3]) + 1, int(b[0]):int(b[2]) + 1]) for b, _ in todo]
+            for (box, thumb), (text, score) in zip(todo, ocr.recognize(crops)):
+                seen.add(box, text, score, thumb)
+                if text.strip():
+                    found.append((box, text, score))
+                    words.append((box, text, score, thumb))
+            timing["ocr_recognize"] += time.perf_counter() - t
+        return found
     last_thumb, last_ocr_frame, last_frame, first_change = None, None, None, None
     frame_count, ocr_regions = 0, 0
     pass_start = time.perf_counter()
 
-    def run_ocr(frame, n, region, since):
-        nonlocal lines, ocr_regions
+    screen = []  # every OCR box on screen now: (box, text, score)
+
+    def run_ocr(frame, n, region, since, shift=(0, 0)):
+        nonlocal lines, ocr_regions, screen
         t = time.perf_counter()
-        if region == "full":
-            found = ocr(frame)
-            lines = []
-            crops = [((0, 0, aw, ah), found)]
-        else:
-            crops = []
-            for rx0, ry0, rx1, ry1 in region:
-                found = ocr(np.ascontiguousarray(frame[ry0:ry1, rx0:rx1]))
-                crops.append(((rx0, ry0, rx1, ry1), [
-                    ((b[0] + rx0, b[1] + ry0, b[2] + rx0, b[3] + ry0), text, score)
-                    for b, text, score in found
-                ]))
-            lines = [ln for ln in lines if not any(_intersects(ln["box"], c[0]) for c in crops)]
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) if incremental else None
+        # Changed areas are read as full-width bands, so every text line they
+        # touch is read whole (a crop around new characters would cut lines).
+        rects = [(0, 0, aw, ah)] if region == "full" else _bands(region, aw)
+        crops = [(rect, read_area(frame, gray, rect, shift)) for rect in rects]
+        screen = [w for w in screen if not any(_intersects(w[0], c[0]) for c in crops)]
+        for _, found in crops:
+            screen += found
         timing["ocr"] += time.perf_counter() - t
         ocr_regions += len(crops)
         t = time.perf_counter()
-        for _, found in crops:
-            for line in group_rows(found):
-                line["spans"] = find(line["text"])
-                lines.append(line)
+        # Lines are rebuilt from all text on screen, so a value whose parts
+        # were read in different passes is still checked as one line.
+        lines = group_rows(screen)
+        for line in lines:
+            line["spans"] = find(line["text"])
         timing["presidio"] += time.perf_counter() - t
         pii = [b for ln in lines if ln["spans"] for b in span_boxes(ln, ln["spans"], settings.box_pad)]
         events.append({"frame": n, "since": since, "region": region, "lines": list(lines), "pii": pii})
@@ -245,7 +420,9 @@ def redact_video(
         if region is not None and first_change is None:
             first_change = n
         if region is not None and (last_ocr_frame is None or n - last_ocr_frame >= settings.min_ocr_interval):
-            run_ocr(frame, n, region, first_change)
+            shift = _scroll_shift(last_thumb, thumb, region, settings.thumb_scale) \
+                if incremental and last_thumb is not None else (0, 0)
+            run_ocr(frame, n, region, first_change, shift)
             last_thumb, last_ocr_frame, first_change = thumb, n, None
     # The end of the chunk differs from the last OCR'd frame: OCR it too.
     if last_frame is not None and last_ocr_frame != frame_count - 1:
@@ -253,7 +430,10 @@ def redact_video(
                                         interpolation=cv2.INTER_AREA), cv2.COLOR_BGR2GRAY)
         region = _changed_regions(thumb, last_thumb, settings, settings.thumb_scale, (aw, ah))
         if region is not None:
-            run_ocr(last_frame, frame_count - 1, region, first_change if first_change is not None else frame_count - 1)
+            shift = _scroll_shift(last_thumb, thumb, region, settings.thumb_scale) if incremental else (0, 0)
+            run_ocr(last_frame, frame_count - 1, region,
+                    first_change if first_change is not None else frame_count - 1, shift)
+    detail = {k: timing.pop(k) for k in ("ocr_detect", "ocr_recognize") if k in timing}
     timing["decode"] = (time.perf_counter() - pass_start) - sum(timing.values())
 
     # Frame ranges each OCR's boxes cover (from the previous OCR to the next).
@@ -296,11 +476,16 @@ def redact_video(
         for stage in ("decode", "change_detection", "ocr", "presidio", "mask", "encode"):
             if stage in timing:
                 on_timing(stage, timing[stage],
-                          **({"ocr_frames": len(events), "ocr_regions": ocr_regions} if stage == "ocr" else {}))
+                          **({"ocr_frames": len(events), "ocr_regions": ocr_regions,
+                              "lines_recognised": counts["recognised"], "lines_reused": counts["reused"],
+                              **{k: round(v, 3) for k, v in detail.items()}}
+                             if stage == "ocr" else {}))
     return {
         "masked": masked,
         "frames": frame_count,
         "ocr_frames": len(events),
+        "lines_recognised": counts["recognised"],
+        "lines_reused": counts["reused"],
         "entities": dict(entities),
         "layer": layer,
         "size": [width, height],

@@ -299,7 +299,7 @@ class FakeWorker:
     def __init__(self, fail=False):
         self.fail, self.calls = fail, []
 
-    def run(self, recording, part):
+    def run(self, recording, part, threads=None):
         self.calls.append(part)
         if self.fail:
             return {"ok": False, "error": "boom"}

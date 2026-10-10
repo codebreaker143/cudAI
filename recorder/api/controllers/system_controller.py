@@ -5,6 +5,7 @@ from typing import Tuple, Dict, Any
 from core.permissions import check_permissions, request_permission
 from core.consent import CONSENT_VERSION, get_consent, get_contributor_id, record_consent
 from core.constants import RECORDER_VERSION, SCHEMA_VERSION
+from core import device_profile
 from core.upload import load_config as load_upload_config, save_config as save_upload_config
 from core.utils import RECORDING_DIR, get_app_data_dir
 from services.error_handler import ErrorHandler, handle_api_errors, Validator
@@ -108,3 +109,23 @@ class SystemController:
         return ErrorHandler.create_success_response(
             self.recording_service.upload_manager.get_status()
         )
+
+    @handle_api_errors
+    def get_device_profile(self) -> Tuple[Dict[str, Any], int]:
+        """Tier, capture settings and hardware used for the next recording."""
+        state = device_profile._load_state()
+        return ErrorHandler.create_success_response({
+            **device_profile.current(),
+            "automatic_tier": device_profile.hardware_tier(device_profile.hardware()),
+            "override": state.get("override"),
+            "tiers": {name: vars(p) for name, p in device_profile.PROFILES.items()},
+        })
+
+    @handle_api_errors
+    def set_device_profile(self) -> Tuple[Dict[str, Any], int]:
+        tier = (request.json or {}).get("tier")
+        try:
+            device_profile.set_override(tier or None)
+        except ValueError as e:
+            return ErrorHandler.create_error_response(str(e), 400)
+        return self.get_device_profile()

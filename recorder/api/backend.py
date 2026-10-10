@@ -85,6 +85,8 @@ class CudaiBackend:
             ("/api/recording/pause", self.system_controller.pause_recording, {"methods": ["POST"]}),
             ("/api/system/info", self.system_controller.system_info),
             ("/api/upload/status", self.system_controller.upload_status),
+            ("/api/device-profile", self.system_controller.get_device_profile),
+            ("/api/device-profile", self.system_controller.set_device_profile, {"methods": ["PUT"]}),
             ("/api/upload/config", self.system_controller.set_upload_config, {"methods": ["PUT"]}),
             # Recording Endpoints
             ("/api/recordings", self.recording_controller.get_user_recordings_list),

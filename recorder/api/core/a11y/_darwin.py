@@ -127,18 +127,34 @@ def running_apps() -> list:
     ]
 
 
+# (pid, window title) -> the AXWebArea found last time. Switching tabs
+# changes the window title, so a stale tab is never read; a single-page app
+# changing its URL within the same tab is, since AXURL is re-read each time.
+_web_area_cache = {}
+
+
 def get_browser_url(pid: int) -> str | None:
     """URL of the page in the app's focused window (first web area found)."""
     app = ApplicationServices.AXUIElementCreateApplication(pid)
     window = _ax_attribute(app, "AXFocusedWindow")
     if window is None:
         return None
+    key = (pid, _ax_attribute(window, "AXTitle"))
+    cached = _web_area_cache.get(key)
+    if cached is not None:
+        url = _ax_attribute(cached, "AXURL")
+        if url is not None:
+            return str(url.absoluteString())
+        _web_area_cache.pop(key, None)  # element gone (page closed or reloaded)
     queue, visited = [(window, 0)], 0
     while queue and visited < 400:
         element, depth = queue.pop(0)
         visited += 1
         if _ax_attribute(element, "AXRole") == "AXWebArea":
             url = _ax_attribute(element, "AXURL")
+            if len(_web_area_cache) > 64:
+                _web_area_cache.clear()
+            _web_area_cache[key] = element
             return str(url.absoluteString()) if url is not None else None
         if depth < 12:
             queue.extend((child, depth + 1) for child in _ax_attribute(element, "AXChildren") or [])

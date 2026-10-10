@@ -104,3 +104,54 @@ def test_masked_chunk_still_joins_with_unmasked_chunks(tmp_path, ocr):
     subprocess.run([get_ffmpeg_path(), "-y", "-v", "error", "-f", "concat", "-safe", "0",
                     "-i", str(tmp_path / "list.txt"), "-c", "copy", str(joined)], check=True)
     assert len(frames_of(joined)) == 2 * FRAMES
+
+
+def test_scrolling_email_stays_masked_in_every_frame(tmp_path, ocr):
+    src, dst = tmp_path / "chunk.mp4", tmp_path / "redacted.mp4"
+    page = [("Invoice list", 0), ("Vendor Acme Supplies", 80), ("Contact jane.doe@acme.com", 160),
+            ("Purchase Order 4500012345", 240), ("Approved by finance", 320)]
+    # The page scrolls up 4 px per frame, like a trackpad scroll.
+    make_chunk(src, lambda n: [(t, 700 + y - 4 * n) for t, y in page if 40 < 700 + y - 4 * n < H - 20])
+    result = redact_video(str(src), str(dst), ocr, get_ffmpeg_path(), h264_encoder_args(), fps=FPS)
+    assert result["masked"]
+    out = frames_of(dst)
+    for n in range(0, FRAMES, 9):
+        texts = [t for _, t, _ in ocr(out[n])]
+        assert not [s for t in texts for s in find_spans(t)], (n, texts)
+
+
+def test_card_number_typed_key_by_key_is_masked(tmp_path, ocr):
+    src, dst = tmp_path / "chunk.mp4", tmp_path / "redacted.mp4"
+    card = "4111 1111 1111 1111"
+    make_chunk(src, lambda n: BUSINESS + [("Card " + card[: min(len(card), n // 3)], 420)])
+    result = redact_video(str(src), str(dst), ocr, get_ffmpeg_path(), h264_encoder_args(), fps=FPS)
+    assert "CREDIT_CARD" in result["entities"]
+    out = frames_of(dst)
+    for n in (60, 75, FRAMES - 1):  # complete from frame 57
+        texts = [t for _, t, _ in ocr(out[n])]
+        assert not [s for t in texts for s in find_spans(t)], (n, texts)
+
+
+def test_unchanged_lines_are_not_recognised_again(tmp_path, ocr):
+    src = tmp_path / "chunk.mp4"
+    # One line changes at frame 45; the rest of the screen stays the same.
+    make_chunk(src, lambda n: BUSINESS + [("Status: draft" if n < 45 else "Status: posted", 420)])
+    result = redact_video(str(src), str(tmp_path / "o.mp4"), ocr, get_ffmpeg_path(), h264_encoder_args(), fps=FPS)
+    assert result["ocr_frames"] == 2
+    # 3 lines read once, then only the changed line (1-2 boxes) again.
+    assert result["lines_recognised"] <= 5
+    texts = [ln["text"] for ln in result["layer"][-1]["lines"]]
+    assert any("posted" in t for t in texts) and any("4500012345" in t for t in texts)
+
+
+def test_one_edited_character_is_recognised_again(ocr):
+    from cudai_privacy.video import _box_thumb, _same_image
+
+    a = np.full((60, 700, 3), 255, np.uint8)
+    b = a.copy()
+    cv2.putText(a, "Account 4111 1111 1111 1112", (10, 40), cv2.FONT_HERSHEY_SIMPLEX, 1.1, (20, 20, 20), 2)
+    cv2.putText(b, "Account 4111 1111 1111 1111", (10, 40), cv2.FONT_HERSHEY_SIMPLEX, 1.1, (20, 20, 20), 2)
+    box = (0, 0, 700, 60)
+    ga, gb = (cv2.cvtColor(x, cv2.COLOR_BGR2GRAY) for x in (a, b))
+    assert _same_image(_box_thumb(ga, box), _box_thumb(ga, box))
+    assert not _same_image(_box_thumb(gb, box), _box_thumb(ga, box))
