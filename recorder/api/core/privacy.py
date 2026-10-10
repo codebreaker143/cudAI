@@ -2,181 +2,32 @@
 Remove personal and sensitive data from recorded text.
 
 Recordings are sold as AI training data, so they must only contain data that
-is valuable and legal to share. Values matching the categories below are
-replaced with typed placeholders such as "[EMAIL]", which keeps the training
-signal ("an email address was entered here") without the personal data.
-
-Categories (placeholder):
-  credentials/secrets  [SECRET]   tokens, API keys, private keys, password=...
-  contact details      [EMAIL] [PHONE]
-  financial/gov IDs    [CARD] (Luhn) [IBAN] (mod-97) [AADHAAR] (Verhoeff)
-                       [PAN] [SSN] [PASSPORT] [BANK_ACCOUNT] (keyword-gated)
-  network/device IDs   [IP] [MAC]
-
-Record identifiers (PO numbers, UUIDs), amounts, dates and app routes are
-kept. Known trade-off: bare 10-digit numbers starting 6-9 are treated as
-Indian mobile numbers.
-
-The video is NOT redacted by this module.
+is valuable and legal to share. Detection uses the shared Presidio-based
+rules in the cudai_privacy package (privacy/), the same rules the ingest
+server applies; values are replaced with placeholders such as
+"[EMAIL_ADDRESS]". This module applies them to recordings: keystrokes
+(typed one key at a time), window titles, URLs, element trees, task names.
 """
 
 import json
 import os
-import re
 from collections import Counter
+
+from cudai_privacy import PRIVACY_VERSION, find_spans, redact_text, redact_tree
 
 from .logger import logger
 
-PRIVACY_VERSION = 1
-
-
-# Validators ------------------------------------------------------------------
-
-def _digits(text: str) -> str:
-    return re.sub(r"\D", "", text)
-
-
-def _luhn_ok(text: str) -> bool:
-    digits = _digits(text)
-    if not 13 <= len(digits) <= 19:
-        return False
-    total = 0
-    for i, d in enumerate(reversed(digits)):
-        n = int(d)
-        if i % 2:
-            n = n * 2 - 9 if n > 4 else n * 2
-        total += n
-    return total % 10 == 0
-
-
-_VERHOEFF_D = [
-    [0, 1, 2, 3, 4, 5, 6, 7, 8, 9], [1, 2, 3, 4, 0, 6, 7, 8, 9, 5],
-    [2, 3, 4, 0, 1, 7, 8, 9, 5, 6], [3, 4, 0, 1, 2, 8, 9, 5, 6, 7],
-    [4, 0, 1, 2, 3, 9, 5, 6, 7, 8], [5, 9, 8, 7, 6, 0, 4, 3, 2, 1],
-    [6, 5, 9, 8, 7, 1, 0, 4, 3, 2], [7, 6, 5, 9, 8, 2, 1, 0, 4, 3],
-    [8, 7, 6, 5, 9, 3, 2, 1, 0, 4], [9, 8, 7, 6, 5, 4, 3, 2, 1, 0],
+__all__ = [
+    "PRIVACY_VERSION",
+    "find_spans",
+    "open_run_start",
+    "privacy_version",
+    "redact_keystrokes",
+    "redact_recording_inputs",
+    "redact_recording_outputs",
+    "redact_text",
+    "redact_tree",
 ]
-_VERHOEFF_P = [
-    [0, 1, 2, 3, 4, 5, 6, 7, 8, 9], [1, 5, 7, 6, 2, 8, 3, 0, 9, 4],
-    [5, 8, 0, 3, 7, 9, 6, 1, 4, 2], [8, 9, 1, 6, 0, 4, 3, 5, 2, 7],
-    [9, 4, 5, 3, 1, 2, 6, 8, 7, 0], [4, 2, 8, 6, 5, 7, 3, 9, 0, 1],
-    [2, 7, 9, 3, 8, 0, 6, 4, 1, 5], [7, 0, 4, 6, 9, 1, 3, 2, 5, 8],
-]
-
-
-def _verhoeff_ok(text: str) -> bool:
-    digits = _digits(text)
-    if len(digits) != 12:
-        return False
-    check = 0
-    for i, d in enumerate(reversed(digits)):
-        check = _VERHOEFF_D[check][_VERHOEFF_P[i % 8][int(d)]]
-    return check == 0
-
-
-def _iban_ok(text: str) -> bool:
-    iban = re.sub(r"\s", "", text).upper()
-    if not 15 <= len(iban) <= 34:
-        return False
-    rearranged = iban[4:] + iban[:4]
-    number = "".join(str(int(c, 36)) for c in rearranged)
-    return int(number) % 97 == 1
-
-
-def _phone_ok(text: str) -> bool:
-    return 8 <= len(_digits(text)) <= 15
-
-
-def _has_letter_and_digit(text: str) -> bool:
-    return bool(re.search(r"[A-Za-z]", text) and re.search(r"\d", text))
-
-
-# Detectors (label, pattern, validator, group) in priority order -------------
-# `group` is the regex group to replace (0 = whole match).
-
-_IPV4_OCTET = r"(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)"
-_HEX4 = r"[0-9A-Fa-f]{1,4}"
-
-DETECTORS = [
-    ("SECRET", re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----"), None, 0),
-    ("SECRET", re.compile(r"eyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}"), None, 0),
-    ("SECRET", re.compile(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b"), None, 0),
-    ("SECRET", re.compile(r"\bAIza[0-9A-Za-z_-]{35}\b"), None, 0),
-    ("SECRET", re.compile(r"\bgh[pousr]_[A-Za-z0-9]{36,}\b"), None, 0),
-    ("SECRET", re.compile(r"\bxox[abprs]-[A-Za-z0-9-]{10,}\b"), None, 0),
-    ("SECRET", re.compile(
-        r"(?i)\b(?:password|passwd|pwd|passcode|secret|token|api[_-]?key|apikey|"
-        r"access[_-]?key|auth[_-]?token|session[_-]?id)\s*[:=]\s*"
-        r"(?!\[[A-Z_]+\])([^\s&;#,\"']+)"), None, 1),
-    # The top-level domain stops where letter case flips ("acme.comQuarterly"),
-    # so text typed right after an email is not swallowed.
-    ("EMAIL", re.compile(
-        r"[A-Za-z0-9._%+-]+(?:@|%40)[A-Za-z0-9.-]+\.(?:[a-z]{2,24}(?![a-z])|[A-Z]{2,24}(?![A-Za-z]))"), None, 0),
-    ("IBAN", re.compile(r"\b[A-Z]{2}\d{2}(?: ?[A-Z0-9]{4}){2,7}(?: ?[A-Z0-9]{1,4})?\b"), _iban_ok, 0),
-    # Not inside a longer token: digits within a UUID or hex id can pass the
-    # checksums by chance ("4662-8535-25394450" in a UUID is Luhn-valid).
-    ("CARD", re.compile(r"(?<![\w-])(?:\d[ -]?){12,18}\d(?![\w-])"), _luhn_ok, 0),
-    ("AADHAAR", re.compile(r"(?<![\w-])[2-9]\d{3}[ -]?\d{4}[ -]?\d{4}(?![\w-])"), _verhoeff_ok, 0),
-    ("SSN", re.compile(r"(?<!\d)(?!000|666|9\d\d)\d{3}-(?!00)\d{2}-(?!0000)\d{4}(?!\d)"), None, 0),
-    ("PAN", re.compile(r"\b[A-Z]{3}[ABCFGHLJPT][A-Z]\d{4}[A-Z]\b"), None, 0),
-    ("PASSPORT", re.compile(
-        r"(?i)passport(?:\s*(?:no\.?|number|#))?[\s.:#-]{0,5}([A-Z0-9]{6,9})\b"), _has_letter_and_digit, 1),
-    ("PASSPORT", re.compile(
-        r"(?i)passport(?:\s*(?:no\.?|number|#))?[\s.:#-]{0,5}(\d{8,9})\b"), None, 1),
-    ("BANK_ACCOUNT", re.compile(
-        r"(?i)\b(?:account|acct|a/c)(?:\s*(?:no\.?|number|#))?[\s.:#-]{0,5}(\d[\d -]{7,20}\d)\b"), None, 1),
-    ("PHONE", re.compile(r"(?<![\w+])\+\d{1,3}[\s.-]?\(?\d{1,4}\)?(?:[\s.-]?\d{2,5}){2,4}(?!\d)"), _phone_ok, 0),
-    ("PHONE", re.compile(r"(?<![\w+])(?:(?:\+?91|0)[\s-]?)?[6-9]\d{4}[\s-]?\d{5}(?!\d)"), None, 0),
-    ("PHONE", re.compile(r"(?<!\d)(?:\(\d{3}\)\s?|\d{3}[-.\s])\d{3}[-.\s]\d{4}(?!\d)"), None, 0),
-    ("MAC", re.compile(r"(?<![\w:-])(?:[0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}(?![\w:-])"), None, 0),
-    ("IP", re.compile(rf"(?<![\w:])(?:{_HEX4}:){{7}}{_HEX4}(?![\w:])"), None, 0),
-    ("IP", re.compile(rf"(?<![\w:])(?:{_HEX4}:){{1,7}}:(?:{_HEX4}:){{0,6}}{_HEX4}(?![\w:])"), None, 0),
-    ("IP", re.compile(rf"(?<![\d.])(?:{_IPV4_OCTET}\.){{3}}{_IPV4_OCTET}(?![\d.])"), None, 0),
-    ("SECRET", re.compile(r"(?<![A-Za-z0-9_+/=%-])[A-Za-z0-9_+/=%-]{48,}(?![A-Za-z0-9_+/=%-])"),
-     _has_letter_and_digit, 0),
-]
-
-
-def find_spans(text: str) -> list:
-    """Non-overlapping (start, end, label) spans of sensitive data."""
-    if not text:
-        return []
-    spans = []
-    for label, pattern, validator, group in DETECTORS:
-        for match in pattern.finditer(text):
-            start, end = match.span(group)
-            value = match.group(group)
-            if not value or (validator and not validator(value)):
-                continue
-            if any(start < s_end and s_start < end for s_start, s_end, _ in spans):
-                continue
-            spans.append((start, end, label))
-    return sorted(spans)
-
-
-def redact_text(text, counts: Counter | None = None):
-    """Replace sensitive values in `text` with typed placeholders."""
-    if not isinstance(text, str):
-        return text
-    spans = find_spans(text)
-    if not spans:
-        return text
-    for start, end, label in reversed(spans):
-        text = text[:start] + f"[{label}]" + text[end:]
-        if counts is not None:
-            counts[label] += 1
-    return text
-
-
-def redact_tree(obj, counts: Counter | None = None):
-    """redact_text on every string inside nested dicts/lists (keys kept)."""
-    if isinstance(obj, str):
-        return redact_text(obj, counts)
-    if isinstance(obj, list):
-        return [redact_tree(v, counts) for v in obj]
-    if isinstance(obj, dict):
-        return {k: redact_tree(v, counts) for k, v in obj.items()}
-    return obj
 
 
 # Keystrokes ------------------------------------------------------------------

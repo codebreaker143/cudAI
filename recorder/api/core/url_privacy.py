@@ -8,7 +8,7 @@ personal data, so every parameter name and the URL's shape are kept, but:
 
 - values of credential-like parameters become [SECRET]
 - personal and sensitive values anywhere in the URL are replaced using the
-  shared detectors in core/privacy.py ([EMAIL], [PHONE], [CARD], ...)
+  shared Presidio rules (cudai_privacy) ([EMAIL_ADDRESS], [PHONE_NUMBER], [CREDIT_CARD], ...)
 - user:password@ credentials in the host part are dropped
 """
 

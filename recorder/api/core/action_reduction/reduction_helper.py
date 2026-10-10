@@ -46,7 +46,7 @@ def typed_key_name(event) -> str:
     What a key press contributes to typed text: the produced character when
     the recorder captured one (e.g. "T" or "@" with shift), else the key name.
     An empty text is kept: privacy redaction collapses a typed email into one
-    "[EMAIL]" key and empties the others.
+    "[EMAIL_ADDRESS]" key and empties the others.
     """
     text = event.get("text")
     return text if text is not None else event["name"]

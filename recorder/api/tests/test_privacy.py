@@ -14,23 +14,23 @@ REDACT = [
     ("gh ghp_1234567890abcdefghijklmnopqrstuvwxyzAB", "gh [SECRET]"),
     ("-----BEGIN RSA PRIVATE KEY-----\nMIIEow\n-----END RSA PRIVATE KEY-----", "[SECRET]"),
     # contact details
-    ("Mail jane.doe@acme.co.in today", "Mail [EMAIL] today"),
-    ("call +91 98765 43210", "call [PHONE]"),
-    ("mobile 9876543210", "mobile [PHONE]"),
-    ("US office (415) 555-0132", "US office [PHONE]"),
-    ("+44 20 7946 0958", "[PHONE]"),
+    ("Mail jane.doe@acme.co.in today", "Mail [EMAIL_ADDRESS] today"),
+    ("call +91 98765 43210", "call [PHONE_NUMBER]"),
+    ("mobile 9876543210", "mobile [PHONE_NUMBER]"),
+    ("US office (415) 555-0132", "US office [PHONE_NUMBER]"),
+    ("+44 20 7946 0958", "[PHONE_NUMBER]"),
     # financial & government ids
-    ("card 4111 1111 1111 1111 exp", "card [CARD] exp"),
-    ("IBAN GB82 WEST 1234 5698 7654 32", "IBAN [IBAN]"),
-    ("Aadhaar 2341 2341 2346", "Aadhaar [AADHAAR]"),
-    ("PAN ABCPE1234F", "PAN [PAN]"),
-    ("SSN 123-45-6789", "SSN [SSN]"),
+    ("card 4111 1111 1111 1111 exp", "card [CREDIT_CARD] exp"),
+    ("IBAN GB82 WEST 1234 5698 7654 32", "IBAN [IBAN_CODE]"),
+    ("Aadhaar 2341 2341 2346", "Aadhaar [IN_AADHAAR]"),
+    ("PAN ABCPE1234F", "PAN [IN_PAN]"),
+    ("SSN 123-45-6789", "SSN [US_SSN]"),
     ("Passport No: K1234567", "Passport No: [PASSPORT]"),
     ("Account number: 123456789012", "Account number: [BANK_ACCOUNT]"),
     # network & device ids
-    ("server 192.168.1.20 down", "server [IP] down"),
-    ("v6 2001:db8:85a3::8a2e:370:7334", "v6 [IP]"),
-    ("mac 3C:22:FB:1A:2B:3C", "mac [MAC]"),
+    ("server 192.168.1.20 down", "server [IP_ADDRESS] down"),
+    ("v6 2001:db8:85a3::8a2e:370:7334", "v6 [IP_ADDRESS]"),
+    ("mac 3C:22:FB:1A:2B:3C", "mac [MAC_ADDRESS]"),
 ]
 
 
@@ -63,9 +63,9 @@ def test_counts_and_trees():
     counts = Counter()
     tree = {"AXTitle": "Reply to jane@acme.com", "children": [{"AXValue": "9876543210"}], "size": 3}
     assert redact_tree(tree, counts) == {
-        "AXTitle": "Reply to [EMAIL]", "children": [{"AXValue": "[PHONE]"}], "size": 3,
+        "AXTitle": "Reply to [EMAIL_ADDRESS]", "children": [{"AXValue": "[PHONE_NUMBER]"}], "size": 3,
     }
-    assert counts == Counter({"EMAIL": 1, "PHONE": 1})
+    assert counts == Counter({"EMAIL_ADDRESS": 1, "PHONE_NUMBER": 1})
 
 
 def _typing(text, t0=100.0, name_of=lambda c: c.lower()):
@@ -82,8 +82,8 @@ def test_typed_email_is_redacted_key_by_key():
     counts = Counter()
     redact_keystrokes(events, counts)
     typed = "".join(e["text"] for e in events if e["action"] == "press" and e["text"] is not None)
-    assert typed == "hi [EMAIL] ok"
-    assert counts == Counter({"EMAIL": 1})
+    assert typed == "hi [EMAIL_ADDRESS] ok"
+    assert counts == Counter({"EMAIL_ADDRESS": 1})
     leaked = {e.get("char") for e in events} | {e.get("name") for e in events}
     assert not {"j", "@"} & leaked  # neither chars nor physical key names remain
     # Every redacted press still has a matching (redacted) release.
@@ -104,7 +104,7 @@ def test_deleted_characters_inside_a_span_do_not_leak():
 
 def test_find_spans_does_not_overlap():
     spans = find_spans("jane@acme.com 192.168.1.1")
-    assert [label for *_, label in spans] == ["EMAIL", "IP"]
+    assert [label for *_, label in spans] == ["EMAIL_ADDRESS", "IP_ADDRESS"]
 
 
 def test_processed_recording_contains_no_pii(tmp_path):
@@ -167,7 +167,17 @@ def test_processed_recording_contains_no_pii(tmp_path):
 
     metadata = json.loads((rec / "metadata.json").read_text())
     assert metadata["privacy"]["version"] >= 1
-    assert metadata["privacy"]["redactions"]["EMAIL"] >= 2
+    assert metadata["privacy"]["redactions"]["EMAIL_ADDRESS"] >= 2
     assert metadata["privacy"]["video_redacted"] is False
     descriptions = [json.loads(line)["description"] for line in (rec / "reduced_events_vis.jsonl").read_text().splitlines()]
-    assert any("[EMAIL]" in d for d in descriptions) and any("[CARD]" in d for d in descriptions)
+    assert any("[EMAIL_ADDRESS]" in d for d in descriptions) and any("[CREDIT_CARD]" in d for d in descriptions)
+
+
+def test_presidio_phone_recognizer_adds_national_formats():
+    # Not matched by the cudAI rules; found by Presidio's libphonenumber.
+    assert redact_text("London desk 020 7946 0958") == "London desk [PHONE_NUMBER]"
+
+
+def test_version_1_placeholders_are_renamed():
+    assert redact_text("sent to [EMAIL] from [IP]") == "sent to [EMAIL_ADDRESS] from [IP_ADDRESS]"
+    assert redact_text("[EMAIL_ADDRESS] stays") == "[EMAIL_ADDRESS] stays"

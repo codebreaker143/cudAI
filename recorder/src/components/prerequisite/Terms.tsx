@@ -104,7 +104,7 @@ const TermsAndConsent: React.FC<TermsAndConsentProps> = ({
                             PAN, SSN and passport numbers) and IP/MAC addresses from
                             the recorded text: typing, window titles, page
                             addresses and on-screen element labels. They are
-                            replaced with labels such as [EMAIL].
+                            replaced with labels such as [EMAIL_ADDRESS].
                         </p>
                         <p className="mt-2">
                             The screen video is not redacted. Everything visible on

@@ -114,11 +114,11 @@ def test_live_chunks_and_redacted_events_then_complete(tmp_path, configured):
                                         "button": "left", "pressed": True}], mode="a")
     manager.tick()
     delta = open(remote(configured, rec, "live/events/000001.jsonl")).read()
-    assert "[EMAIL]" in delta
+    assert "[EMAIL_ADDRESS]" in delta
     for leaked in ('"jane"', '"j"', "acme"):
         assert leaked not in delta
     texts = "".join(json.loads(l).get("text") or "" for l in delta.splitlines())
-    assert texts == "mail [EMAIL]"
+    assert texts == "mail [EMAIL_ADDRESS]"
 
     # Recording stopped and processed: remaining chunk, final files, complete.
     manager.clear_live()

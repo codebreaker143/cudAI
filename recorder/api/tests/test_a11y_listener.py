@@ -8,7 +8,7 @@ from core.a11y_listener import A11yListener, sanitize_url
 def test_url_keeps_state_but_redacts_secrets_and_pii():
     assert (
         sanitize_url("https://erp.example.com/po/4500?session=SECRET&user=a@b.com#step2")
-        == "https://erp.example.com/po/4500?session=[SECRET]&user=[EMAIL]#step2"
+        == "https://erp.example.com/po/4500?session=[SECRET]&user=[EMAIL_ADDRESS]#step2"
     )
     assert sanitize_url(None) is None
 

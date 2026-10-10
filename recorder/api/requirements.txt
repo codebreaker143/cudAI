@@ -12,6 +12,9 @@ gevent==24.2.1
 gevent-websocket==0.10.1
 loguru==0.7.2
 
+# Redaction rules shared with the ingest server (Microsoft Presidio)
+-e ../../privacy
+
 # Cloud upload (CA certificates for HTTPS inside the packaged app)
 certifi==2025.11.12
 

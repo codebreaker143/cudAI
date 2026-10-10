@@ -1,0 +1,13 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cudai-privacy"
+version = "2.0.0"
+description = "cudAI redaction rules (Microsoft Presidio), shared by the desktop app and the ingest server"
+requires-python = ">=3.10"
+dependencies = ["presidio-analyzer==2.2.364", "spacy>=3.7,<3.9"]
+
+[tool.setuptools]
+packages = ["cudai_privacy"]
