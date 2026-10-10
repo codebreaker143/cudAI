@@ -47,6 +47,9 @@ models that operate computers.
 - 34.7-minute recording: 46k events → 1,087 actions, processed in 1.9 s;
   cursor matched recorded clicks exactly at 0.5, 12 and 30 min.
 - 4-hour synthetic load: processed in about 5 s, 531 MB peak memory.
+- Live upload with real capture: first 10-second chunk (300 frames) reached
+  the server mid-recording; after stop the server-rebuilt video matched the
+  local `video.mp4` frame for frame.
 - Video at native resolution (3024×1964 on a MacBook), 30 fps, about
   460 MB/hour.
 
@@ -66,10 +69,6 @@ models that operate computers.
 
 ## Needs verification
 
-- **Live upload with real screen capture.** Unit- and integration-tested
-  against the local server; the real-capture test
-  (`CUDAI_E2E=1 python -m pytest tests/test_e2e_recording.py -k live_upload`)
-  needs an unlocked screen.
 
 - **Multi-display capture on real hardware.** It is implemented and
   unit-tested, but needs a second, non-mirrored monitor. Run:
