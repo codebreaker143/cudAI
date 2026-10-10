@@ -194,13 +194,7 @@ def _typing_runs(events: list) -> list:
     for i, e in enumerate(events):
         action = e.get("action")
         t = e.get("time_stamp", 0)
-        breaks = (
-            action == "click"
-            or action in ("pause", "resume")
-            or (action == "press" and e.get("name") in RUN_BREAK_KEYS)
-            or (last_t is not None and t - last_t > RUN_GAP_SECONDS)
-        )
-        if breaks and current:
+        if _breaks_run(e, last_t) and current:
             runs.append(current)
             current = []
         if action == "press":
@@ -212,6 +206,35 @@ def _typing_runs(events: list) -> list:
     if current:
         runs.append(current)
     return runs
+
+
+def _breaks_run(e: dict, last_t) -> bool:
+    action = e.get("action")
+    return (
+        action == "click"
+        or action in ("pause", "resume")
+        or (action == "press" and e.get("name") in RUN_BREAK_KEYS)
+        or (last_t is not None and e.get("time_stamp", 0) - last_t > RUN_GAP_SECONDS)
+    )
+
+
+def open_run_start(events: list, now: float) -> int:
+    """
+    Index of the first event of a typing run that may still continue at
+    `now` (len(events) if there is none). Live upload holds events from there
+    on back, so a value typed across an upload boundary is still detected.
+    """
+    start, last_t = None, None
+    for i, e in enumerate(events):
+        if _breaks_run(e, last_t):
+            start = None
+        if e.get("action") == "press":
+            if start is None and e.get("text"):
+                start = i
+            last_t = e.get("time_stamp", 0)
+    if start is not None and now - last_t <= RUN_GAP_SECONDS:
+        return start
+    return len(events)
 
 
 def _scrub_key(event: dict, text) -> None:

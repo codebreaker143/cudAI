@@ -6,6 +6,7 @@ import { Button, Card, Kbd, PageHeader } from "../ui";
 import { useMain } from "../../context/MainContext";
 import TermsAndConsent from "../prerequisite/Terms";
 import { PermissionList, usePermissions } from "../prerequisite/Permissions";
+import CloudUploadCard from "./CloudUpload";
 
 interface SystemInfo {
     version: string;
@@ -58,7 +59,7 @@ export default function SettingsPage() {
 
     return (
         <div className="flex-1 overflow-y-auto">
-            <PageHeader title="Settings" description="Storage, shortcuts and the terms you accepted." />
+            <PageHeader title="Settings" description="Storage, cloud upload, shortcuts and the terms you accepted." />
             <div className="max-w-3xl space-y-6 p-8">
                 <Card>
                     <h2 className="border-b border-zinc-100 px-5 py-3 text-sm font-semibold text-zinc-900 dark:border-zinc-800 dark:text-zinc-100">
@@ -97,6 +98,8 @@ export default function SettingsPage() {
                         </Row>
                     </dl>
                 </Card>
+
+                <CloudUploadCard />
 
                 <Card>
                     <h2 className="border-b border-zinc-100 px-5 py-3 text-sm font-semibold text-zinc-900 dark:border-zinc-800 dark:text-zinc-100">

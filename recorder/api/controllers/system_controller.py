@@ -5,6 +5,7 @@ from typing import Tuple, Dict, Any
 from core.permissions import check_permissions, request_permission
 from core.consent import CONSENT_VERSION, get_consent, get_contributor_id, record_consent
 from core.constants import RECORDER_VERSION, SCHEMA_VERSION
+from core.upload import load_config as load_upload_config, save_config as save_upload_config
 from core.utils import RECORDING_DIR, get_app_data_dir
 from services.error_handler import ErrorHandler, handle_api_errors, Validator
 from services.recording_service import RecordingService
@@ -82,4 +83,27 @@ class SystemController:
     def recording_status(self) -> Tuple[Dict[str, Any], int]:
         return ErrorHandler.create_success_response(
             self.recording_service.get_status()
+        )
+
+    @handle_api_errors
+    def upload_status(self) -> Tuple[Dict[str, Any], int]:
+        return ErrorHandler.create_success_response(
+            self.recording_service.upload_manager.get_status()
+        )
+
+    @handle_api_errors
+    def set_upload_config(self) -> Tuple[Dict[str, Any], int]:
+        """Save the cloud upload server and access key (key is write-only)."""
+        data = request.json or {}
+        Validator.validate_required_fields(data, ["server_url"])
+        access_key = data.get("access_key")
+        if access_key is None:  # keep the saved key when only the URL changes
+            access_key = load_upload_config()["access_key"]
+        try:
+            save_upload_config(str(data["server_url"]), str(access_key))
+        except ValueError as e:
+            return ErrorHandler.create_error_response(str(e), 400)
+        self.recording_service.upload_manager.wake()
+        return ErrorHandler.create_success_response(
+            self.recording_service.upload_manager.get_status()
         )

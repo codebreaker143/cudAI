@@ -1,0 +1,5 @@
+# cudAI ingest server
+Flask==3.0.3
+gunicorn==23.0.0
+# Only for CUDAI_STORAGE=s3 (AWS S3, Cloudflare R2, GCS interoperability, MinIO)
+boto3==1.35.36

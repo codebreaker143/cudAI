@@ -90,3 +90,8 @@ def video_file_name(display_index: int) -> str:
 
 def segments_dir_name(display_index: int) -> str:
     return "segments" if display_index == 0 else f"segments_display_{display_index}"
+
+
+def chunks_dir_name(display_index: int) -> str:
+    """Where a display's 10-second video chunks are written (and uploaded from)."""
+    return f"chunks/display_{display_index}"

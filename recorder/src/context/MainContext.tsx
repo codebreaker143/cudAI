@@ -178,6 +178,12 @@ export const MainProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                     : "Recording paused because your Mac went to sleep. Resume when you're ready."
             );
         });
+        // Refresh per-recording upload badges as uploads progress.
+        let uploadRefresh: ReturnType<typeof setTimeout> | undefined;
+        const offUpload = SocketService.Listen("upload_status", () => {
+            clearTimeout(uploadRefresh);
+            uploadRefresh = setTimeout(fetchTasks, 1000);
+        });
         // Tray hint while a full accessibility snapshot is taken.
         const offAxtree = SocketService.Listen("axtree", (data: any) => {
             ipc().sendMessage(data?.status === "start" ? "tree-start" : "tree-end");
@@ -196,6 +202,8 @@ export const MainProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             offAutoStop();
             offAxtree();
             offAutoPause();
+            offUpload();
+            clearTimeout(uploadRefresh);
         };
     }, [SocketService, fetchTasks, refreshStatus, showError, showInfo, showSuccess]);
 

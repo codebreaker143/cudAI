@@ -196,3 +196,5 @@ runtime.log
 log.txt
 ffmpeg.exe
 xcode
+# Ingest server local storage (development)
+server/data/

@@ -1,6 +1,6 @@
 # cudAI Recorder — Progress Status
 
-_Last updated: 2026-10-09 · branch `xrec-native-capture` · CI green_
+_Last updated: 2026-10-10 · branch `xrec-native-capture`_
 
 cudAI is a macOS desktop app that records people doing real work (screen,
 mouse, keyboard, apps, UI elements) and packages it as training data for AI
@@ -15,8 +15,8 @@ models that operate computers.
 | 3 | Standardize recording schema | ✅ Done | `cudai.recording.v1`: `manifest.json` + `timeline.jsonl` with video time, frame and wall-clock time per event |
 | 4 | Fix event/video timestamp alignment | ✅ Done | Frame-exact (taken from the capture device's first frame); verified over 35 min, including across system sleep |
 | 5 | Fix keyboard + reducer data quality | ✅ Done | Stable key names (⌘/⌥ bug fixed), typed text, shortcuts; app's own hotkeys and window excluded; regression test on reducer output |
-| 6 | Pause/resume + chunking | 🟡 Partly done | Pause/resume done (also automatic on sleep and screen lock). 10-second chunking moves to step 7 |
-| 7 | Cloud upload | ⏳ Not started | Design ready: 10-second chunks, resumable upload queue, pre-signed URLs. Needs a decision on cloud provider and backend |
+| 6 | Pause/resume + chunking | ✅ Done | Pause/resume (also automatic on sleep and screen lock). Video written as 10-second chunks (exactly 300 frames); frames after a pause are cut before upload; a crash loses at most the last chunk |
+| 7 | Cloud upload | 🟡 Built, needs a server | Live upload every 10 s (video chunks + redacted events), resumable after network loss and restarts, final files after processing. Reference ingest server with local or any S3-compatible storage (AWS, R2, GCS, MinIO) in `server/`. Next: deploy the server and pick the storage provider |
 | 8 | Build Mac installer | 🟡 Partly done | Packaged backend builds (57 MB) and works; universal FFmpeg built. `.dmg` not produced yet |
 | 9 | Windows version | ⏳ Not started | Capture, encoder and installer to be built |
 | 10 | Signing, permissions, onboarding, release testing | 🟡 Partly done | Permission onboarding and mandatory consent done. Signing and notarization wait on the Apple Developer ID |
@@ -39,7 +39,7 @@ models that operate computers.
 - **Review UI:** video player with timeline, action markers and click
   overlay; actions/events/details panels in sync; task naming; sub-task
   splitting.
-- **Engineering:** 90 automated tests, opt-in real screen-recording tests,
+- **Engineering:** 101 automated tests, opt-in real screen-recording tests,
   CI on every push (Apple Silicon), pinned dependencies and lockfile.
 
 ## Verified on real usage
@@ -52,10 +52,11 @@ models that operate computers.
 
 ## Open items, in priority order
 
-1. **Unsigned internal installer (`.dmg`)** for pilot contributors.
-2. **Cloud upload** in 10-second chunks with a secure server (provider and
-   backend decision needed).
-3. **Contributor accounts and task assignment.**
+1. **Deploy the ingest server** (pick AWS S3, Cloudflare R2 or GCS; HTTPS
+   domain) and issue access keys.
+2. **Unsigned internal installer (`.dmg`)** for pilot contributors, with the
+   server address preset.
+3. **Contributor accounts and task assignment** (replace shared access keys).
 4. **Quality review and buyer export pipeline.**
 5. **Video privacy:** detect and blur sensitive text in the video.
 6. **Legal review** of terms, consent withdrawal (India DPDP Act) and buyer
@@ -64,6 +65,11 @@ models that operate computers.
 8. **Signing, notarization and auto-update** once the Developer ID arrives.
 
 ## Needs verification
+
+- **Live upload with real screen capture.** Unit- and integration-tested
+  against the local server; the real-capture test
+  (`CUDAI_E2E=1 python -m pytest tests/test_e2e_recording.py -k live_upload`)
+  needs an unlocked screen.
 
 - **Multi-display capture on real hardware.** It is implemented and
   unit-tested, but needs a second, non-mirrored monitor. Run:

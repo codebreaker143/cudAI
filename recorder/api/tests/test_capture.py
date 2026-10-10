@@ -154,6 +154,106 @@ def test_interrupted_two_display_recording_is_recovered(tmp_path, monkeypatch):
     assert [d["video"]["segments"][0]["frames"] for d in metadata["displays"]] == [45, 44]
 
 
+def chunked_segment(chunk_dir, chunk_frames, partial_line=False):
+    """A segment as FFmpeg's segment muxer leaves it: chunks + chunks.csv."""
+    chunk_dir.mkdir(parents=True)
+    lines, start = [], 0
+    for i, frames in enumerate(chunk_frames):
+        make_clip(str(chunk_dir / f"chunk_{i:05d}.mp4"), frames)
+        lines.append(f"chunk_{i:05d}.mp4,{start / FPS:.6f},{(start + frames) / FPS:.6f}\n")
+        start += frames
+    (chunk_dir / "chunks.csv").write_text(
+        "".join(lines) + (f"chunk_{len(chunk_frames):05d}.mp4,{start / FPS:.6f},1" if partial_line else "")
+    )
+
+
+def video_frames(path):
+    cap = cv2.VideoCapture(str(path))
+    n = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    cap.release()
+    return n
+
+
+def test_chunks_after_pause_request_are_held_back_and_trimmed(tmp_path):
+    capture = XrecCapture(str(tmp_path), fps=FPS)
+    chunk_dir = tmp_path / "chunks" / "display_0" / "segment_000"
+    chunked_segment(chunk_dir, [30, 30, 30])  # 3 x 1 s
+    seg = {
+        "index": 0, "chunk_dir": str(chunk_dir), "start_timestamp": 100.0,
+        "width": 320, "height": 200,
+    }
+    capture.segments = [seg]
+    assert [c["frames"] for c in capture.ready_chunks()] == [30, 30, 30]
+
+    # Paused at 101.5 s: while FFmpeg shuts down, only chunks that end before
+    # the request may be uploaded.
+    seg["stop_requested_at"] = 101.5
+    ready = capture.ready_chunks()
+    assert [c["path"] for c in ready] == ["chunks/display_0/segment_000/chunk_00000.mp4"]
+
+    capture._seal(seg)
+    assert [(c["start_frame"], c["frames"]) for c in capture.ready_chunks()] == [(0, 30), (30, 15)]
+    assert video_frames(chunk_dir / "chunk_00001.mp4") == 15
+    assert not (chunk_dir / "chunk_00002.mp4").exists()
+
+    info = capture.finalize()
+    assert info["duration"] == pytest.approx(1.5)
+    assert video_frames(tmp_path / "video.mp4") == 45
+    assert info["segments"][0]["chunks"] == [
+        {"path": "chunks/display_0/segment_000/chunk_00000.mp4", "start_frame": 0, "frames": 30},
+        {"path": "chunks/display_0/segment_000/chunk_00001.mp4", "start_frame": 30, "frames": 15},
+    ]
+    assert (chunk_dir / "chunk_00000.mp4").exists()  # kept for upload
+    assert info["parts"] == [c["path"] for c in info["segments"][0]["chunks"]]
+
+
+def test_chunked_pause_gap_is_kept_with_chunks(tmp_path):
+    capture = XrecCapture(str(tmp_path), fps=FPS)
+    segs = []
+    for index, start in enumerate([100.0, 103.0]):  # 1 s recorded, 2 s paused
+        chunk_dir = tmp_path / "chunks" / "display_0" / f"segment_{index:03d}"
+        chunked_segment(chunk_dir, [30])
+        segs.append({"index": index, "chunk_dir": str(chunk_dir), "start_timestamp": start,
+                     "stop_requested_at": start + 1.0, "width": 320, "height": 200})
+    capture.segments = segs
+    info = capture.finalize()
+    assert info["parts"] == [
+        "chunks/display_0/segment_000/chunk_00000.mp4",
+        "chunks/display_0/gap_001.mp4",
+        "chunks/display_0/segment_001/chunk_00000.mp4",
+    ]
+    assert (tmp_path / "chunks" / "display_0" / "gap_001.mp4").exists()
+    assert video_frames(tmp_path / "video.mp4") == 120
+
+
+def test_crashed_chunked_recording_keeps_closed_chunks(tmp_path, monkeypatch):
+    import json
+
+    import core.recovery as recovery
+
+    rec = tmp_path / "rec-3"
+    (rec / "segments").mkdir(parents=True)
+    (rec / "segments" / "segment_000.log").write_text(
+        "Input #0, avfoundation\n  Duration: N/A, start: 100.000000\n"
+        "Output #0, segment\n  Stream #0:0: Video: h264, yuv420p, 320x200\nframe=   60\n"
+    )
+    chunk_dir = rec / "chunks" / "display_0" / "segment_000"
+    chunked_segment(chunk_dir, [30, 30], partial_line=True)
+    # Power loss: the chunk being written has no index (moov) and is unlisted.
+    (chunk_dir / "chunk_00002.mp4").write_bytes(b"\x00\x00\x00\x20ftypisom" + b"\x00" * 500)
+    (rec / "events.jsonl").write_text(json.dumps(
+        {"time_stamp": 103.0, "action": "click", "x": 1, "y": 1, "button": "left", "pressed": True}
+    ) + "\n")
+    monkeypatch.setattr(recovery, "RECORDING_DIR", str(tmp_path))
+
+    assert recovery.find_interrupted_recordings() == [str(rec)]
+    assert recovery.recover_recording(str(rec))
+    video = json.loads((rec / "metadata.json").read_text())["video"]
+    assert video["segments"][0]["frames"] == 60
+    assert len(video["segments"][0]["chunks"]) == 2
+    assert video_frames(rec / "video.mp4") == 60
+
+
 FAKE_FFMPEG = """#!/bin/sh
 # Fake FFmpeg: "-i hang:none" ignores SIGINT and never starts; any other
 # device reports a start time and runs until killed or sent "q".

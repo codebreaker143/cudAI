@@ -7,7 +7,7 @@ import {
     MagnifyingGlassIcon,
 } from "@heroicons/react/20/solid";
 import { useMain } from "../../context/MainContext";
-import { RecordingSummary } from "../../lib/api";
+import { RecordingSummary, RecordingUpload } from "../../lib/api";
 import { formatDate, formatDuration, isUntitled, taskTitle } from "../../lib/format";
 import { Badge, Button, Card, EmptyState, PageHeader, Spinner, cx } from "../ui";
 
@@ -26,6 +26,33 @@ export function RecordingStatusBadge({ recording }: { recording: RecordingSummar
         return <Badge tone="neutral">No actions</Badge>;
     }
     return <Badge tone="green">Ready</Badge>;
+}
+
+export function UploadBadge({ upload }: { upload?: RecordingUpload }) {
+    switch (upload?.state) {
+        case "uploaded":
+            return <Badge tone="green">Uploaded</Badge>;
+        case "uploading":
+            return (
+                <Badge tone="sky">
+                    <Spinner className="h-3 w-3" /> Uploading
+                </Badge>
+            );
+        case "waiting":
+            return <Badge tone="amber">Waiting to upload</Badge>;
+        case "error":
+            return (
+                <span title={upload.error}>
+                    <Badge tone="red">Upload failed</Badge>
+                </span>
+            );
+        default:
+            return (
+                <span title="Recorded under earlier terms; kept on this computer only.">
+                    <Badge tone="neutral">Local only</Badge>
+                </span>
+            );
+    }
 }
 
 type SortKey = "creation_time" | "task_name" | "duration" | "action_count";
@@ -140,6 +167,7 @@ export default function RecordingsPage() {
                                     ))}
                                     <th className={cx(TH, "w-64")}>Apps</th>
                                     <th className={cx(TH, "w-32")}>Status</th>
+                                    <th className={cx(TH, "w-40")}>Cloud</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-zinc-100 bg-white dark:divide-zinc-800 dark:bg-zinc-900">
@@ -194,6 +222,9 @@ export default function RecordingsPage() {
                                             </td>
                                             <td className="px-4 py-3">
                                                 <RecordingStatusBadge recording={r} />
+                                            </td>
+                                            <td className="px-4 py-3">
+                                                <UploadBadge upload={r.upload} />
                                             </td>
                                         </tr>
                                     );

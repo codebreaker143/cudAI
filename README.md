@@ -52,6 +52,30 @@ as SAP Fiori routes and search terms). `manifest.json` → `privacy` records the
 policy version and redaction counts. **The video is not redacted.** Older
 recordings are redacted automatically on the next launch.
 
+### Cloud upload
+
+New recordings upload automatically while they are recorded
+(`api/core/upload.py`), to the cudAI ingest server in [server/](server/)
+(any S3-compatible storage):
+
+- **Video** is written as standalone 10-second MP4 chunks
+  (`chunks/display_N/segment_SSS/chunk_CCCCC.mp4`, 300 frames each), each
+  uploaded as soon as it closes. Frames captured after the contributor
+  presses pause are cut before the chunk leaves the computer. A crash or
+  power loss loses at most the last chunk.
+- **Events** are uploaded every 10 s, redacted first; a typing run still in
+  progress waits for the next upload so values typed across a boundary are
+  still caught.
+- **After processing**, the final files go up and the recording is marked
+  complete; local chunks are then deleted (`video.mp4` stays). The server
+  rebuilds identical videos from `video.parts` in `metadata.json`.
+
+Progress is kept in `upload_state.json` per recording, so uploads resume after
+network loss or a restart. Recordings made under terms before
+`CLOUD_UPLOAD_CONSENT_VERSION` (`api/core/consent.py`) are never uploaded.
+Configure in **Settings › Cloud upload**, or with `CUDAI_UPLOAD_URL` and
+`CUDAI_UPLOAD_KEY`.
+
 Keyboard events carry `name` (physical key, stable across modifiers), `char`
 (what the OS produced), `text` (what the press contributed to typed text, if
 any) and `modifiers`. The app's own shortcuts and input to the cudAI window are

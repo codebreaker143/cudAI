@@ -36,7 +36,27 @@ export const api = {
     get: <T>(path: string) => request<T>(path),
     post: <T>(path: string, body: unknown) =>
         request<T>(path, { method: "POST", body: JSON.stringify(body) }),
+    put: <T>(path: string, body: unknown) =>
+        request<T>(path, { method: "PUT", body: JSON.stringify(body) }),
 };
+
+/** Cloud upload of one recording. */
+export interface RecordingUpload {
+    state: "local_only" | "waiting" | "uploading" | "uploaded" | "error";
+    bytes?: number;
+    completed_at?: string;
+    error?: string;
+}
+
+/** The background uploader (GET /api/upload/status). */
+export interface UploadStatus {
+    state: "idle" | "uploading" | "offline" | "error" | "not_configured";
+    last_upload_at: number | null;
+    last_error: string | null;
+    configured: boolean;
+    server_url: string;
+    access_key_set: boolean;
+}
 
 export interface RecordingSummary {
     name: string;
@@ -49,6 +69,7 @@ export interface RecordingSummary {
     duration?: number | null;
     action_count?: number | null;
     apps?: string[];
+    upload?: RecordingUpload;
 }
 
 export interface Action {

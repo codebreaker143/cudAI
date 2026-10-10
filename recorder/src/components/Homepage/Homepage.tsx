@@ -13,6 +13,26 @@ import { useMain } from "../../context/MainContext";
 import { formatClock, formatDate, formatDuration, isUntitled, taskTitle } from "../../lib/format";
 import { Button, Card, Kbd, PageHeader, cx } from "../ui";
 import { RecordingStatusBadge } from "../Recordings/RecordingsPage";
+import { useUploadStatus } from "../Settings/CloudUpload";
+
+/** Cloud sync state while recording ("Synced 8 s ago"). */
+function SyncLine() {
+    const [status] = useUploadStatus(2000);
+    const [now, setNow] = useState(Date.now());
+    useEffect(() => {
+        const timer = setInterval(() => setNow(Date.now()), 1000);
+        return () => clearInterval(timer);
+    }, []);
+    if (!status?.configured) return null;
+    let text = "Waiting for the first upload…";
+    if (status.state === "offline") text = "Offline — will upload when back online";
+    else if (status.state === "error") text = "Upload problem — see Settings";
+    else if (status.last_upload_at) {
+        const ago = Math.max(0, Math.round(now / 1000 - status.last_upload_at));
+        text = `Synced to cloud ${ago < 60 ? `${ago} s` : `${Math.round(ago / 60)} min`} ago`;
+    }
+    return <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">{text}</p>;
+}
 
 function StatusDisplay() {
     const { isRecording, isPaused, elapsedSeconds } = useMain();
@@ -52,6 +72,7 @@ function StatusDisplay() {
                 </span>
             </div>
             <p className={cx("mt-4 text-sm font-medium", styles.text)}>{styles.label}</p>
+            {isRecording && <SyncLine />}
         </div>
     );
 }

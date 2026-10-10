@@ -122,3 +122,82 @@ def test_multi_display_capture():
     second_video = http.get(review["displays"][1]["video_url"], headers={"Range": "bytes=0-99"})
     assert second_video.status_code == 206
     os.system(f"chflags -R nouchg '{folder}'")
+
+
+def _frames(path):
+    import re
+
+    from core.utils import run_ffmpeg
+
+    log = run_ffmpeg(["-i", path, "-map", "0:v", "-c", "copy", "-f", "null", "-"]).stderr
+    return int(re.findall(r"frame=\s*(\d+)", log)[-1])
+
+
+def test_live_upload_and_server_rebuild(tmp_path, monkeypatch):
+    """
+    Records ~17 s with a pause while uploading to a local ingest server, then
+    rebuilds the video on the server side from the uploaded chunks.
+    """
+    import sys
+    import threading
+
+    from werkzeug.serving import make_server
+
+    from backend import CudaiBackend
+    from core.utils import RECORDING_DIR, get_ffmpeg_path
+
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "server"))
+    from cudai_ingest.app import create_app
+    from cudai_ingest.assemble import assemble
+
+    server_app = create_app({"api_keys": ["e2e-key"], "storage": "local",
+                             "storage_dir": str(tmp_path / "server"), "signing_key": b"s" * 32})
+    storage = server_app.extensions["cudai_storage"]
+    httpd = make_server("127.0.0.1", 0, server_app, threaded=True)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    monkeypatch.setenv("CUDAI_UPLOAD_URL", f"http://127.0.0.1:{httpd.server_port}")
+    monkeypatch.setenv("CUDAI_UPLOAD_KEY", "e2e-key")
+
+    before = set(os.listdir(RECORDING_DIR)) if os.path.isdir(RECORDING_DIR) else set()
+    backend = CudaiBackend()
+    http = backend.app.test_client()
+    version = http.get("/api/consent").get_json()["current_version"]
+    http.post("/api/consent", json={"accepted": True, "version": version})
+    sio = backend.socketio.test_client(backend.app)
+
+    sio.emit("start_record", {})
+    assert reply(sio, "start_record")["status"] == "succeed"
+    (name,) = set(os.listdir(RECORDING_DIR)) - before
+    folder = os.path.join(RECORDING_DIR, name)
+    first_chunk = f"recordings/{name}/chunks/display_0/segment_000/chunk_00000.mp4"
+
+    # The first 10-second chunk reaches the server while still recording.
+    deadline = time.time() + 20
+    while storage.sha256(first_chunk) is None and time.time() < deadline:
+        time.sleep(0.5)
+    assert storage.sha256(first_chunk), "first chunk was not uploaded during recording"
+    assert _frames(storage.path(first_chunk)) == 300
+
+    for event, wait in (("pause_record", 2), ("resume_record", 3), ("stop_record", 0)):
+        sio.emit(event, {})
+        assert reply(sio, event)["status"] == "succeed", event
+        time.sleep(wait)
+    assert reply(sio, "reduced")["status"] == "succeed"
+
+    deadline = time.time() + 60
+    record = None
+    while time.time() < deadline:
+        record = storage.read_json(f"recordings/{name}/_recording.json") or {}
+        if record.get("status") == "complete":
+            break
+        time.sleep(0.5)
+    assert record.get("status") == "complete", record
+    assert not os.path.exists(os.path.join(folder, "chunks"))
+    assert storage.sha256(f"recordings/{name}/live/events/000001.jsonl")
+
+    (rebuilt,) = assemble(storage, name, str(tmp_path / "rebuilt"), ffmpeg=get_ffmpeg_path())
+    local = os.path.join(folder, "video.mp4")
+    assert _frames(rebuilt) == _frames(local)
+    metadata = json.load(open(os.path.join(folder, "metadata.json")))
+    assert _frames(rebuilt) == round(metadata["video"]["duration"] * 30)
+    os.system(f"chflags -R nouchg '{folder}'")

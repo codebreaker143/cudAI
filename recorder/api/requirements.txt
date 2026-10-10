@@ -12,6 +12,9 @@ gevent==24.2.1
 gevent-websocket==0.10.1
 loguru==0.7.2
 
+# Cloud upload (CA certificates for HTTPS inside the packaged app)
+certifi==2025.11.12
+
 # Input capture (patched pynput: fixes macOS key events; pinned commit)
 pynput @ git+https://github.com/moses-palmer/pynput.git@25a43fddc5dab1ad8628fdf601760f1896af12f8
 

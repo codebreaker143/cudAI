@@ -75,6 +75,8 @@ class CudaiBackend:
             ("/api/recording/status", self.system_controller.recording_status),
             ("/api/recording/pause", self.system_controller.pause_recording, {"methods": ["POST"]}),
             ("/api/system/info", self.system_controller.system_info),
+            ("/api/upload/status", self.system_controller.upload_status),
+            ("/api/upload/config", self.system_controller.set_upload_config, {"methods": ["PUT"]}),
             # Recording Endpoints
             ("/api/recordings", self.recording_controller.get_user_recordings_list),
             ("/api/recording/<recording_name>/review", self.recording_controller.get_review),

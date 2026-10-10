@@ -16,7 +16,9 @@ if [ "${1:-}" = "universal" ]; then
   "$HERE/build_ffmpeg_lgpl.sh" x86_64
   "$HERE/build_ffmpeg_lgpl.sh" arm64
   API="$HERE/../api"
-  lipo -create "$API/ffmpeg-x86_64" "$API/ffmpeg-arm64" -output "$API/ffmpeg"
+  # Replace by rename: a running capture keeps using the old binary.
+  lipo -create "$API/ffmpeg-x86_64" "$API/ffmpeg-arm64" -output "$API/ffmpeg.new"
+  mv -f "$API/ffmpeg.new" "$API/ffmpeg"
   rm "$API/ffmpeg-x86_64" "$API/ffmpeg-arm64"
   echo "Built universal $API/ffmpeg: $(lipo -archs "$API/ffmpeg")"
   exit 0
@@ -62,7 +64,7 @@ command -v nasm >/dev/null || ASM_FLAG="--disable-x86asm"
   --enable-encoder=h264_videotoolbox \
   --enable-decoder=h264,rawvideo,wrapped_avframe \
   --enable-demuxer=mov,concat \
-  --enable-muxer=mp4,mov,null \
+  --enable-muxer=mp4,mov,null,segment \
   --enable-protocol=file,pipe \
   --enable-parser=h264 \
   --enable-bsf=h264_mp4toannexb,extract_extradata,null \
@@ -79,6 +81,7 @@ for flag in CONFIG_GPL CONFIG_NONFREE CONFIG_VERSION3; do
 done
 
 make -j"$(sysctl -n hw.ncpu)"
-cp ffmpeg "$OUT"
-strip "$OUT"
+cp ffmpeg "$OUT.new"
+strip "$OUT.new"
+mv -f "$OUT.new" "$OUT"
 echo "Built $OUT ($FFMPEG_VERSION, $ARCH, LGPL-2.1-or-later)"

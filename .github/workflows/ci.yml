@@ -36,7 +36,7 @@ jobs:
         run: scripts/build_ffmpeg_lgpl.sh
 
       - name: Lint
-        run: python -m pyflakes backend.py build.py runtime-hook.py controllers services core tests
+        run: python -m pyflakes backend.py build.py runtime-hook.py controllers services core tests ../../server
 
       - name: Tests
         env:

@@ -43,6 +43,7 @@ from core.recovery import (
     stop_orphaned_captures,
 )
 from core.constants import SUCCEED, FAILED
+from core.upload import UploadManager, recording_upload_status
 
 
 # Disk space guard (bytes). Video is ~0.5-1.5 GB per hour.
@@ -80,6 +81,10 @@ class RecordingService:
         # Start/stop/pause can come from the UI, shortcuts and the disk monitor.
         self._lifecycle_lock = threading.RLock()
 
+        # Uploads recordings to cudAI's cloud, live while recording.
+        self.upload_manager = UploadManager(socketio)
+        self.upload_manager.start()
+
         threading.Thread(target=self._recover_interrupted, daemon=True).start()
 
     def _recover_interrupted(self) -> None:
@@ -88,8 +93,11 @@ class RecordingService:
             stop_orphaned_captures()
             for path in find_interrupted_recordings():
                 try:
+                    self.upload_manager.mark_busy(path)
                     if recover_recording(path):
                         self.reducer_queue.put(self._make_reducer(path))
+                    else:
+                        self.upload_manager.recording_processed(path)
                 except Exception:
                     logger.exception(f"RecordingService: could not recover {path}")
         except Exception:
@@ -179,6 +187,7 @@ class RecordingService:
             )
 
             self.recorder_thread.start_recording()
+            self.upload_manager.set_live(recording_path, self.recorder_thread.capture_client)
             threading.Thread(
                 target=self._monitor_disk, args=(self.recorder_thread,), daemon=True
             ).start()
@@ -214,6 +223,7 @@ class RecordingService:
         finally:
             # Never leave the service stuck in "recording".
             self.recorder_thread = None
+            self.upload_manager.clear_live()
 
         # Mark recording as processing while the reducer works.
         if self.user_recordings and recording_id in self.user_recordings:
@@ -384,6 +394,7 @@ class RecordingService:
             },
         )
         write_export(folder)
+        self.upload_manager.mark_dirty(folder)
         if self.user_recordings and recording_name in self.user_recordings:
             self._update_recording_info(self.user_recordings[recording_name], recording_name)
         return SUCCEED, "Task saved"
@@ -450,6 +461,7 @@ class RecordingService:
             folder_path = os.path.join(RECORDING_DIR, recording_name)
             self._save_modified_events(folder_path, events_data)
             write_export(folder_path)
+            self.upload_manager.mark_dirty(folder_path)
             return SUCCEED, "Recording modifications saved successfully"
 
         except Exception as e:
@@ -468,6 +480,7 @@ class RecordingService:
 
         self.recorder_thread = None
         self.reducer = None
+        self.upload_manager.clear_live()
 
     def _process_reducer_queue(self) -> None:
         """Process the reducer queue in background thread."""
@@ -510,6 +523,8 @@ class RecordingService:
                 )
 
             finally:
+                # Uploaded if processing succeeded (needs the processed files).
+                self.upload_manager.recording_processed(reducer.recording_path)
                 self.reducer_queue.task_done()
 
     def _convert_legacy_recording_names(self) -> None:
@@ -619,6 +634,7 @@ class RecordingService:
         )
 
         recording["status"] = "local" if reduction_complete else "processing"
+        recording["upload"] = recording_upload_status(recording_path)
         recording["task_name"] = get_task_name_from_folder(recording_name)
         recording["task_description"] = get_description_from_folder(recording_name)
 

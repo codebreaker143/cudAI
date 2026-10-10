@@ -3,11 +3,23 @@ import re
 import shutil
 import signal
 import subprocess
+import threading
 import time
 
-from .displays import segments_dir_name, video_file_name
+from .displays import chunks_dir_name, segments_dir_name, video_file_name
 from .logger import logger
-from .utils import VIDEO_FPS, get_ffmpeg_path, h264_encoder_args, run_ffmpeg
+from .utils import (
+    KEYFRAME_INTERVAL,
+    VIDEO_FPS,
+    get_ffmpeg_path,
+    h264_encoder_args,
+    run_ffmpeg,
+)
+
+# Video is written as standalone MP4 chunks of this length, so it can be
+# uploaded while recording and survives a crash or power loss up to the last
+# closed chunk.
+CHUNK_SECONDS = 10
 
 
 # FFmpeg does not exit when its parent dies, so an orphaned capture would keep
@@ -37,16 +49,60 @@ FRAME_RE = re.compile(r"frame=\s*(\d+)")
 SIZE_RE = re.compile(r"Video: \w+.*?, (\d{2,5})x(\d{2,5})")
 
 
+def read_chunk_list(chunk_dir: str, fps: int) -> list:
+    """
+    Closed chunks of a segment, in order. FFmpeg appends a line to chunks.csv
+    ("name,start,end" in seconds) as each chunk is closed; a chunk still
+    being written (or cut off by a crash) is not listed.
+    """
+    path = os.path.join(chunk_dir, "chunks.csv")
+    if not os.path.exists(path):
+        return []
+    with open(path, "r", errors="replace") as f:
+        lines = f.read().split("\n")[:-1]  # the last piece may be partial
+    chunks, next_frame = [], 0
+    for line in lines:
+        try:
+            name, start, end = line.split(",")
+            start_frame, end_frame = round(float(start) * fps), round(float(end) * fps)
+        except ValueError:
+            continue
+        file = os.path.join(chunk_dir, name)
+        if not os.path.exists(file) or end_frame <= start_frame:
+            continue
+        if start_frame != next_frame:
+            logger.warning(f"read_chunk_list: {file} does not follow the previous chunk")
+            break
+        chunks.append({"file": file, "start_frame": start_frame, "frames": end_frame - start_frame})
+        next_frame = end_frame
+    return chunks
+
+
+def trim_video(path: str, frames: int) -> None:
+    """Keep only the first `frames` frames of an MP4 (stream copy, in place)."""
+    trimmed = path[: -len(".mp4")] + "_trimmed.mp4"
+    result = run_ffmpeg(
+        ["-y", "-i", path, "-frames:v", str(frames),
+         "-c", "copy", "-movflags", "+faststart", trimmed]
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"Failed to trim {path}: {result.stderr[-500:]}")
+    os.replace(trimmed, path)
+
+
 class XrecCapture:
     """
     Native screen capture with FFmpeg (macOS avfoundation).
 
-    Every start/resume records a separate segment. On macOS the capture
+    Every start/resume records a separate segment, written as 10-second MP4
+    chunks (chunks/display_N/segment_SSS/chunk_CCCCC.mp4). On macOS the capture
     timestamps reported by avfoundation (`start:` in FFmpeg's log) use the
     same monotonic host clock as Python's time.perf_counter(), so each
     segment's first frame is known exactly in the event timeline.
 
-    finalize() joins the segments into video.mp4 and fills paused gaps with
+    When a segment stops, its chunks are sealed: frames captured after the
+    pause/stop request are cut, so they never reach an uploaded chunk.
+    finalize() joins all chunks into video.mp4 and fills paused gaps with
     black frames, so video time == perf_counter time - video_start_timestamp
     for the whole recording.
     """
@@ -63,6 +119,7 @@ class XrecCapture:
         self.recording_path = recording_path
         self.display_index = display_index
         self.segments_dir = os.path.join(recording_path, segments_dir_name(display_index))
+        self.chunks_dir = os.path.join(recording_path, chunks_dir_name(display_index))
         self.output_name = video_file_name(display_index)
         self.fps = fps
         self.screen_device = screen_device
@@ -70,6 +127,7 @@ class XrecCapture:
         self.log_file = None
         self._pending = None
         self.segments = []
+        self._lock = threading.Lock()  # segments are read by the uploader
 
     def _find_screen_device(self) -> str:
         if self.screen_device is None:
@@ -95,8 +153,9 @@ class XrecCapture:
 
         os.makedirs(self.segments_dir, exist_ok=True)
         index = len(self.segments)
-        video_path = os.path.join(self.segments_dir, f"segment_{index:03d}.mp4")
         log_path = os.path.join(self.segments_dir, f"segment_{index:03d}.log")
+        chunk_dir = self._chunk_dir(index)
+        os.makedirs(chunk_dir, exist_ok=True)
         screen_device = self._find_screen_device()
 
         command = [
@@ -112,8 +171,17 @@ class XrecCapture:
             # Constant frame rate: frame n is exactly at start + n / fps.
             "-fps_mode", "cfr",
             "-r", str(self.fps),
-            "-movflags", "+faststart",
-            video_path,
+            # Keyframes exactly every 2 s, so chunks split exactly at 10 s.
+            "-force_key_frames", f"expr:gte(t,n_forced*{KEYFRAME_INTERVAL / self.fps:g})",
+            "-f", "segment",
+            "-segment_time", str(CHUNK_SECONDS),
+            "-reset_timestamps", "1",
+            "-segment_format", "mp4",
+            "-segment_format_options", "movflags=+faststart",
+            "-segment_list", os.path.join(chunk_dir, "chunks.csv"),
+            "-segment_list_type", "csv",
+            "-segment_list_flags", "+live",
+            os.path.join(chunk_dir, "chunk_%05d.mp4"),
         ]
 
         if os.name != "nt":
@@ -128,12 +196,16 @@ class XrecCapture:
             # Own process group, so the guardian and FFmpeg can be killed together.
             start_new_session=os.name != "nt",
         )
-        self._pending = {"index": index, "file": video_path, "log": log_path}
+        self._pending = {"index": index, "chunk_dir": chunk_dir, "log": log_path}
+
+    def _chunk_dir(self, index: int) -> str:
+        return os.path.join(self.chunks_dir, f"segment_{index:03d}")
 
     def await_segment_start(self) -> dict:
         segment = self._pending
         segment["start_timestamp"] = self._wait_for_start(segment["log"])
-        self.segments.append(segment)
+        with self._lock:
+            self.segments.append(segment)
         logger.info(
             f"XrecCapture: display {self.display_index} segment {segment['index']} "
             f"first frame at {segment['start_timestamp']}"
@@ -170,6 +242,9 @@ class XrecCapture:
             return None
         if requested_at is None:
             requested_at = time.perf_counter()
+        segment = self.segments[-1]
+        # Set first: from now on ready_chunks() holds back anything after it.
+        segment["stop_requested_at"] = requested_at
 
         if self.process.poll() is None:
             try:
@@ -183,10 +258,67 @@ class XrecCapture:
         self.process = None
         self._close_log()
 
-        segment = self.segments[-1]
-        segment["stop_requested_at"] = requested_at
         self._read_segment_log(segment)
+        self._seal(segment)
         return segment
+
+    def _seal(self, segment: dict) -> None:
+        """
+        Fix a stopped segment's chunk list: frames after the pause/stop
+        request are cut from the last chunk and later chunks are removed.
+        Idempotent, so recovery can seal again.
+        """
+        chunks = read_chunk_list(segment["chunk_dir"], self.fps)
+        allowed = sum(c["frames"] for c in chunks)
+        requested_at = segment.get("stop_requested_at")
+        if requested_at is not None:
+            # Epsilon: (104.8 - 104.0) * 30 is 23.999... in floating point.
+            wanted = int((requested_at - segment["start_timestamp"]) * self.fps + 1e-6)
+            allowed = max(0, min(allowed, wanted))
+        kept = []
+        for chunk in chunks:
+            if chunk["start_frame"] >= allowed:
+                os.remove(chunk["file"])
+                continue
+            keep = allowed - chunk["start_frame"]
+            if keep < chunk["frames"]:
+                trim_video(chunk["file"], keep)
+                chunk["frames"] = keep
+            kept.append(chunk)
+        segment["chunks"] = kept
+        segment["frames"] = allowed
+        segment["duration"] = allowed / self.fps
+
+    def ready_chunks(self) -> list:
+        """
+        Chunks that are final and safe to upload: closed, and entirely before
+        any pause/stop request (a chunk spanning a pause is trimmed first).
+        """
+        with self._lock:
+            segments = list(self.segments)
+        ready = []
+        for segment in segments:
+            if "chunk_dir" not in segment:
+                continue
+            chunks = segment.get("chunks")
+            if chunks is None:
+                chunks = read_chunk_list(segment["chunk_dir"], self.fps)
+                requested_at = segment.get("stop_requested_at")
+                if requested_at is not None:
+                    limit = (requested_at - segment["start_timestamp"]) * self.fps
+                    chunks = [c for c in chunks if c["start_frame"] + c["frames"] <= limit]
+            ready += [self._chunk_info(segment, c) for c in chunks]
+        return ready
+
+    def _chunk_info(self, segment: dict, chunk: dict) -> dict:
+        return {
+            "display": self.display_index,
+            "segment": segment["index"],
+            "path": os.path.relpath(chunk["file"], self.recording_path).replace(os.sep, "/"),
+            "file": chunk["file"],
+            "start_frame": chunk["start_frame"],
+            "frames": chunk["frames"],
+        }
 
     def _read_segment_log(self, segment: dict) -> None:
         """Fill frames/duration/size from the segment's FFmpeg log."""
@@ -216,17 +348,25 @@ class XrecCapture:
             log_path = os.path.join(self.segments_dir, name)
             with open(log_path, "r", errors="replace") as f:
                 match = START_RE.search(f.read())
-            video_path = log_path[: -len(".log")] + ".mp4"
-            if not match or not os.path.exists(video_path):
+            if not match:
                 continue
             segment = {
                 "index": i,
-                "file": video_path,
                 "log": log_path,
                 "start_timestamp": float(match.group(1)),
                 "stop_requested_at": stop_requests[i] if i < len(stop_requests) else None,
             }
+            index = int(name[len("segment_"):-len(".log")])
+            video_path = log_path[: -len(".log")] + ".mp4"
+            if os.path.isdir(self._chunk_dir(index)):
+                segment["chunk_dir"] = self._chunk_dir(index)
+            elif os.path.exists(video_path):
+                segment["file"] = video_path  # recorded before chunking
+            else:
+                continue
             self._read_segment_log(segment)
+            if "chunk_dir" in segment:
+                self._seal(segment)
             self.segments.append(segment)
 
     def _terminate(self):
@@ -279,14 +419,19 @@ class XrecCapture:
         """
         output_path = os.path.join(self.recording_path, self.output_name)
         for segment in self.segments:
-            self._trim_after_stop_request(segment)
+            if "chunk_dir" in segment:
+                if "chunks" not in segment:
+                    self._seal(segment)
+            else:
+                self._trim_after_stop_request(segment)
         segments = [s for s in self.segments if s.get("frames")]
         if not segments:
             raise RuntimeError("No video was captured.")
 
         first = segments[0]
         width, height = first.get("width"), first.get("height")
-        timeline = []  # (kind, path) in order
+        timeline = []  # files of video.mp4, in order
+        chunked = all("chunks" in s for s in segments)
         gaps = []
         offset = 0.0
         for i, segment in enumerate(segments):
@@ -296,7 +441,11 @@ class XrecCapture:
                 gap = segment["start_timestamp"] - prev_end
                 gap_frames = max(0, round(gap * self.fps))
                 if gap_frames > 0:
-                    gap_path = os.path.join(self.segments_dir, f"gap_{i:03d}.mp4")
+                    # Chunked recordings keep gap clips with the chunks, so
+                    # video.mp4 can be rebuilt from uploaded files alone.
+                    gap_dir = self.chunks_dir if chunked else self.segments_dir
+                    os.makedirs(gap_dir, exist_ok=True)
+                    gap_path = os.path.join(gap_dir, f"gap_{i:03d}.mp4")
                     self._make_black_clip(gap_path, width, height, gap_frames)
                     timeline.append(gap_path)
                     gaps.append(
@@ -309,16 +458,26 @@ class XrecCapture:
                     )
                     offset += gap_frames / self.fps
             segment["video_offset"] = offset
-            timeline.append(segment["file"])
+            if "chunks" in segment:
+                timeline += [c["file"] for c in segment["chunks"]]
+            else:
+                timeline.append(segment["file"])
             offset += segment["duration"]
 
-        if len(timeline) == 1:
-            shutil.move(timeline[0], output_path)
-        else:
+        if len(timeline) > 1:
             self._concat(timeline, output_path, width, height)
+        elif "chunks" in segments[0]:
+            shutil.copyfile(timeline[0], output_path)  # chunks are kept for upload
+        else:
+            shutil.move(timeline[0], output_path)
 
+        # Chunks stay in chunks/ until they are uploaded (see core.upload).
         shutil.rmtree(self.segments_dir, ignore_errors=True)
 
+        parts = (
+            {"parts": [os.path.relpath(p, self.recording_path).replace(os.sep, "/") for p in timeline]}
+            if chunked else {}
+        )
         return {
             "file": self.output_name,
             "display_index": self.display_index,
@@ -334,10 +493,19 @@ class XrecCapture:
                     "duration": s["duration"],
                     "frames": s["frames"],
                     "video_offset": s["video_offset"],
+                    **(
+                        {"chunks": [
+                            {k: v for k, v in self._chunk_info(s, c).items() if k in ("path", "start_frame", "frames")}
+                            for c in s["chunks"]
+                        ]}
+                        if "chunks" in s else {}
+                    ),
                 }
                 for s in segments
             ],
             "paused_gaps": gaps,
+            # Files that, concatenated in this order (stream copy), give video.mp4.
+            **parts,
         }
 
     def _trim_after_stop_request(self, segment: dict):
@@ -353,14 +521,7 @@ class XrecCapture:
             segment["frames"], segment["duration"] = 0, 0.0
             return
 
-        trimmed = segment["file"].replace(".mp4", "_trimmed.mp4")
-        result = run_ffmpeg(
-            ["-y", "-i", segment["file"], "-frames:v", str(allowed),
-             "-c", "copy", "-movflags", "+faststart", trimmed]
-        )
-        if result.returncode != 0:
-            raise RuntimeError(f"Failed to trim segment: {result.stderr[-500:]}")
-        os.replace(trimmed, segment["file"])
+        trim_video(segment["file"], allowed)
         logger.info(
             f"XrecCapture: trimmed segment {segment['index']} "
             f"from {segment['frames']} to {allowed} frames"
@@ -383,6 +544,7 @@ class XrecCapture:
             raise RuntimeError(f"Failed to create pause gap clip: {result.stderr[-500:]}")
 
     def _concat(self, paths, output_path, width, height):
+        os.makedirs(self.segments_dir, exist_ok=True)
         list_path = os.path.join(self.segments_dir, "concat.txt")
         with open(list_path, "w") as f:
             for path in paths:
@@ -467,6 +629,9 @@ class MultiCapture:
     def stop_recording(self, requested_at: float | None = None):
         for capture in self.captures:
             capture.stop_segment(requested_at)
+
+    def ready_chunks(self) -> list:
+        return [c for capture in self.captures for c in capture.ready_chunks()]
 
     def finalize(self) -> list:
         """Video info per display; the main display must succeed."""

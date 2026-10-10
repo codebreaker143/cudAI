@@ -120,18 +120,25 @@ const TermsAndConsent: React.FC<TermsAndConsentProps> = ({
                             Where recordings are kept
                         </h2>
                         <p className="mt-2">
-                            Recordings are stored on this computer and cannot be
-                            deleted from the app once made. You can review them and
-                            edit their task descriptions and annotations.
+                            Recordings are uploaded automatically to cudAI's secure
+                            cloud storage while they are being made, in 10-second
+                            parts, and a copy is kept on this computer. Recordings
+                            cannot be deleted from the app once made. You can review
+                            them and edit their task descriptions and annotations;
+                            your edits are uploaded too.
+                        </p>
+                        <p className="mt-2">
+                            Recordings made under earlier versions of these terms
+                            stay on this computer and are not uploaded.
                         </p>
                     </section>
 
                     <section>
                         <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                            How submitted recordings are used
+                            How recordings are used
                         </h2>
                         <p className="mt-2">
-                            Recordings you choose to submit may be reviewed,
+                            Recordings may be reviewed,
                             annotated and combined into datasets, and those
                             datasets may be licensed or sold to third parties,
                             including AI companies and research labs, to train and
