@@ -16,6 +16,7 @@ from urllib.parse import urlsplit
 from collections import Counter
 
 from .action_reduction.preprocess import preprocess_events
+from . import timing
 from .constants import SCHEMA_VERSION
 from .displays import display_at
 from .logger import logger
@@ -36,6 +37,16 @@ TIME_BASE = (
 )
 
 KEYBOARD_FIELDS = ("name", "char", "text", "modifiers", "vk")
+
+
+def _privacy_block(recording_path: str, metadata: dict) -> dict:
+    privacy = dict(metadata.get("privacy") or {})
+    summary = read_encrypted_json(os.path.join(recording_path, "redaction_summary.json")) \
+        if os.path.exists(os.path.join(recording_path, "redaction_summary.json")) else None
+    privacy["video_redacted"] = summary is not None
+    if summary:
+        privacy["video"] = summary
+    return privacy
 
 
 def _read_jsonl(path: str) -> list:
@@ -164,7 +175,8 @@ def write_export(recording_path: str) -> dict | None:
             "recorder": metadata.get("recorder"),
             "contributor_id": metadata.get("contributor_id"),
             "consent": metadata.get("consent"),
-            "privacy": metadata.get("privacy"),
+            "privacy": _privacy_block(recording_path, metadata),
+            "pipeline_timing": timing.summary(recording_path),
             "start_time": metadata.get("start_time"),
             "stop_time": metadata.get("stop_time"),
             "environment": {
@@ -201,6 +213,8 @@ def write_export(recording_path: str) -> dict | None:
                 "clicked_elements": "element.jsonl",
                 "actions": "reduced_events_complete.jsonl",
                 "actions_annotated": "reduced_events_vis.jsonl",
+                "ocr_layer": "ocr/<video part>.jsonl (one per 10-second chunk)",
+                "pipeline_timings": "pipeline_timings.jsonl",
             },
             "stats": {
                 "event_counts": dict(counts),

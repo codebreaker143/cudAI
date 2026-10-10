@@ -217,7 +217,6 @@ def _record_privacy(recording_path: str, counts: Counter) -> None:
     metadata["privacy"] = {
         "version": PRIVACY_VERSION,
         "redactions": dict(totals),
-        "video_redacted": False,
     }
     _write_json(metadata_path, metadata)
     if counts:

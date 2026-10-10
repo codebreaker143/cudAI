@@ -1,5 +1,14 @@
 """Refactored Backend with modular architecture."""
 
+import sys
+
+if __name__ == "__main__" and "--redaction-worker" in sys.argv:
+    # OCR/redaction worker process (core/redaction.py); none of the server.
+    from core.redaction import worker_main
+
+    worker_main()
+    sys.exit(0)
+
 import os
 import signal
 from flask import Flask

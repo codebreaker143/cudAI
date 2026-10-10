@@ -43,6 +43,8 @@ from core.recovery import (
     stop_orphaned_captures,
 )
 from core.constants import SUCCEED, FAILED
+from core import timing
+from core.redaction import RedactionManager
 from core.upload import UploadManager, recording_upload_status
 
 
@@ -84,6 +86,9 @@ class RecordingService:
         # Uploads recordings to cudAI's cloud, live while recording.
         self.upload_manager = UploadManager(socketio)
         self.upload_manager.start()
+        # Masks sensitive text in each video chunk before it is uploaded.
+        self.redaction_manager = RedactionManager(self.upload_manager)
+        self.redaction_manager.start()
 
         threading.Thread(target=self._recover_interrupted, daemon=True).start()
 
@@ -492,7 +497,8 @@ class RecordingService:
                 continue
 
             try:
-                reducer.reduce_pipeline()
+                with timing.stage(reducer.recording_path, "process_recording"):
+                    reducer.reduce_pipeline()
                 lock_raw_files(reducer.recording_path)
 
                 recording_id = os.path.basename(reducer.recording_path)

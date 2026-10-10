@@ -168,7 +168,8 @@ def test_processed_recording_contains_no_pii(tmp_path):
     metadata = json.loads((rec / "metadata.json").read_text())
     assert metadata["privacy"]["version"] >= 1
     assert metadata["privacy"]["redactions"]["EMAIL_ADDRESS"] >= 2
-    assert metadata["privacy"]["video_redacted"] is False
+    # Video redaction happens per chunk before upload; none here.
+    assert json.loads((rec / "manifest.json").read_text())["privacy"]["video_redacted"] is False
     descriptions = [json.loads(line)["description"] for line in (rec / "reduced_events_vis.jsonl").read_text().splitlines()]
     assert any("[EMAIL_ADDRESS]" in d for d in descriptions) and any("[CREDIT_CARD]" in d for d in descriptions)
 

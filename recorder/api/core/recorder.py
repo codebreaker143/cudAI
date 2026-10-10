@@ -24,6 +24,7 @@ from .utils import (
 )
 from .a11y_listener import A11yListener
 from .axtree_getter import KeyFrameDetector
+from . import timing
 from .logger import logger
 
 _STOP = object()
@@ -289,6 +290,10 @@ class Recorder(Thread):
         logger.info("Recorder: stop_recording")
         if not self._is_recording:
             return
+        with timing.stage(self.recording_path, "stop_recording"):
+            self._stop_recording()
+
+    def _stop_recording(self):
         requested_at = time.perf_counter()
         self._is_recording = False
         self.metadata_manager.end_collect()

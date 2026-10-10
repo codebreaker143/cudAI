@@ -61,10 +61,10 @@ command -v nasm >/dev/null || ASM_FLAG="--disable-x86asm"
   --disable-doc --disable-ffplay --disable-ffprobe --disable-network \
   --disable-debug --enable-static --disable-shared \
   --enable-indev=avfoundation,lavfi \
-  --enable-encoder=h264_videotoolbox \
+  --enable-encoder=h264_videotoolbox,rawvideo \
   --enable-decoder=h264,rawvideo,wrapped_avframe \
-  --enable-demuxer=mov,concat \
-  --enable-muxer=mp4,mov,null,segment \
+  --enable-demuxer=mov,concat,rawvideo \
+  --enable-muxer=mp4,mov,null,segment,rawvideo \
   --enable-protocol=file,pipe \
   --enable-parser=h264 \
   --enable-bsf=h264_mp4toannexb,extract_extradata,null \

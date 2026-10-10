@@ -6,6 +6,7 @@ import subprocess
 import threading
 import time
 
+from . import timing
 from .displays import chunks_dir_name, segments_dir_name, video_file_name
 from .logger import logger
 from .utils import (
@@ -196,7 +197,8 @@ class XrecCapture:
             # Own process group, so the guardian and FFmpeg can be killed together.
             start_new_session=os.name != "nt",
         )
-        self._pending = {"index": index, "chunk_dir": chunk_dir, "log": log_path}
+        self._pending = {"index": index, "chunk_dir": chunk_dir, "log": log_path,
+                         "launched_unix": time.time()}
 
     def _chunk_dir(self, index: int) -> str:
         return os.path.join(self.chunks_dir, f"segment_{index:03d}")
@@ -204,6 +206,9 @@ class XrecCapture:
     def await_segment_start(self) -> dict:
         segment = self._pending
         segment["start_timestamp"] = self._wait_for_start(segment["log"])
+        timing.record(self.recording_path, "capture_start", segment.pop("launched_unix"),
+                      timing.perf_to_unix(segment["start_timestamp"]),
+                      display=self.display_index, segment=segment["index"])
         with self._lock:
             self.segments.append(segment)
         logger.info(
@@ -245,6 +250,7 @@ class XrecCapture:
         segment = self.segments[-1]
         # Set first: from now on ready_chunks() holds back anything after it.
         segment["stop_requested_at"] = requested_at
+        stop_started = time.time()
 
         if self.process.poll() is None:
             try:
@@ -260,6 +266,8 @@ class XrecCapture:
 
         self._read_segment_log(segment)
         self._seal(segment)
+        timing.record(self.recording_path, "capture_stop", stop_started, time.time(),
+                      display=self.display_index, segment=segment["index"])
         return segment
 
     def _seal(self, segment: dict) -> None:
@@ -318,6 +326,8 @@ class XrecCapture:
             "file": chunk["file"],
             "start_frame": chunk["start_frame"],
             "frames": chunk["frames"],
+            # perf_counter time of the chunk's last frame (upload lag).
+            "end_perf": segment["start_timestamp"] + (chunk["start_frame"] + chunk["frames"]) / self.fps,
         }
 
     def _read_segment_log(self, segment: dict) -> None:
@@ -417,6 +427,10 @@ class XrecCapture:
         """
         Join segments into video.mp4. Returns video metadata for metadata.json.
         """
+        with timing.stage(self.recording_path, "finalize_video", display=self.display_index):
+            return self._finalize()
+
+    def _finalize(self) -> dict:
         output_path = os.path.join(self.recording_path, self.output_name)
         for segment in self.segments:
             if "chunk_dir" in segment:

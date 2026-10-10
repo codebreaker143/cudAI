@@ -29,6 +29,7 @@ from .reduction_helper import (
     wrap_func_key,
 )
 from .preprocess import preprocess_events
+from .. import timing
 from ..logger import logger
 from ..privacy import redact_recording_inputs, redact_tree
 from ..a11y import parse_element
@@ -817,7 +818,9 @@ class Reducer:
             recording_path = self.recording_path
             # Remove personal/sensitive data from the raw inputs before
             # anything (actions, timeline, manifest) is derived from them.
-            redact_recording_inputs(recording_path)
+            with timing.stage(recording_path, "privacy_text"):
+                redact_recording_inputs(recording_path)
+            reduce_started = time.time()
             events = read_encrypted_jsonl(
                 path=os.path.join(recording_path, "events.jsonl")
             )
@@ -862,13 +865,16 @@ class Reducer:
             self.vis_dump(recording_path)
 
             reduction_time = time.perf_counter() - start_time
+            timing.record(recording_path, "reduce_actions", reduce_started, time.time(),
+                          actions=len(self.reduced_actions))
 
             logger.info(
                 f"Reducer: action num: {len(self.reduced_actions)}, reduce time: {reduction_time}"
             )
             from ..export import write_export  # circular at module level
 
-            write_export(recording_path)
+            with timing.stage(recording_path, "export"):
+                write_export(recording_path)
 
         except Exception as e:
             logger.exception(f"reduce_pipeline failed: {str(e)}")

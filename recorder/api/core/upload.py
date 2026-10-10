@@ -1,8 +1,10 @@
 """
 Upload recordings to cudAI's cloud while they are being made.
 
-- Video: each display's 10-second chunks (core.xrec_capture) as soon as they
-  are closed, then the pause-gap clips. The server rebuilds video.mp4 by
+- Video: each display's 10-second chunks (core.xrec_capture) once they are
+  closed and redacted on this computer (core.redaction), with their OCR
+  layer (ocr/<chunk>.jsonl); then the pause-gap clips. An unredacted chunk
+  is never uploaded. The server rebuilds video.mp4 by
   joining video.parts (see server/assemble.py); video.mp4 itself is never
   uploaded.
 - Events: every 10 s, the new lines of the raw logs, redacted (core.privacy),
@@ -28,10 +30,12 @@ import urllib.request
 from datetime import datetime, timezone
 from urllib.parse import urlsplit
 
+from . import timing
 from .consent import CLOUD_UPLOAD_CONSENT_VERSION, get_contributor_id
 from .constants import RECORDER_VERSION, SCHEMA_VERSION
 from .logger import logger
 from .privacy import open_run_start, redact_keystrokes, redact_tree
+from .redaction import load_meta, needs_redaction, upload_source
 from .utils import RECORDING_DIR, get_app_data_dir
 
 LIVE_LOGS = ("events.jsonl", "top_window.jsonl", "element.jsonl")
@@ -46,6 +50,8 @@ PACKAGE_FILES = (
     "reduced_events_complete.jsonl",
     "reduced_events_vis.jsonl",
     "task_name.json",
+    "redaction_summary.json",
+    "pipeline_timings.jsonl",
 )
 STATE_FILE = "upload_state.json"
 
@@ -97,6 +103,10 @@ def save_config(server_url: str, access_key: str) -> dict:
 
 
 # HTTP client --------------------------------------------------------------------
+
+class NotReady(Exception):
+    """A video part is still waiting for on-device redaction."""
+
 
 class UploadError(Exception):
     def __init__(self, message: str, retryable: bool = True, missing: list | None = None):
@@ -241,6 +251,18 @@ def recording_upload_status(recording_path: str) -> dict:
     return {"state": "uploading" if state["files"] else "waiting", "bytes": uploaded}
 
 
+def _part_end_perf(metadata: dict) -> dict:
+    """perf_counter time of each chunk's last frame (for upload lag)."""
+    ends = {}
+    displays = [d.get("video") for d in metadata.get("displays") or []] or [metadata.get("video")]
+    for video in displays:
+        fps = (video or {}).get("fps") or 30
+        for segment in (video or {}).get("segments") or []:
+            for chunk in segment.get("chunks") or []:
+                ends[chunk["path"]] = segment["start_timestamp"] + (chunk["start_frame"] + chunk["frames"]) / fps
+    return ends
+
+
 def _video_parts(metadata: dict) -> list:
     videos = [d.get("video") for d in metadata.get("displays") or []] or [metadata.get("video")]
     parts = []
@@ -290,6 +312,12 @@ class UploadManager(threading.Thread):
     def clear_live(self) -> None:
         with self._lock:
             self._live = None
+
+    @property
+    def live(self):
+        """(recording_path, capture) of the recording in progress, if any."""
+        with self._lock:
+            return self._live
 
     def mark_busy(self, recording_path: str) -> None:
         with self._lock:
@@ -378,13 +406,20 @@ class UploadManager(threading.Thread):
     def _upload_live(self, client: UploadClient, path: str, capture) -> None:
         state = load_state(path)
         self._open_recording(client, path, state)
+        metadata = _read_json(os.path.join(path, "metadata.json"))
         for chunk in capture.ready_chunks():
-            self._put_file(client, path, state, chunk["path"], immutable=True)
+            source = upload_source(path, chunk["path"])
+            if source is not None:  # else: still being redacted
+                self._put_part(client, path, state, chunk["path"], source, metadata, chunk.get("end_perf"))
         if time.monotonic() - self._last_live_logs >= self.LIVE_LOG_INTERVAL:
             self._upload_live_logs(client, path, state)
             self._last_live_logs = time.monotonic()
 
     def _upload_live_logs(self, client: UploadClient, path: str, state: dict) -> None:
+        with timing.stage(path, "live_events"):
+            self._upload_live_logs_now(client, path, state)
+
+    def _upload_live_logs_now(self, client: UploadClient, path: str, state: dict) -> None:
         for name in LIVE_LOGS:
             file = os.path.join(path, name)
             if not os.path.exists(file):
@@ -439,7 +474,10 @@ class UploadManager(threading.Thread):
                 self._done.add(path)
                 continue
             try:
-                self._upload_finished(client, path, state)
+                with timing.stage(path, "final_upload"):
+                    self._upload_finished(client, path, state)
+            except NotReady:
+                continue  # waiting for redaction; checked again next tick
             except UploadError as e:
                 if e.retryable:
                     raise
@@ -451,11 +489,27 @@ class UploadManager(threading.Thread):
     def _upload_finished(self, client: UploadClient, path: str, state: dict) -> None:
         self._open_recording(client, path, state)
         metadata = _read_json(os.path.join(path, "metadata.json"))
+        ends = _part_end_perf(metadata)
         for part in _video_parts(metadata):
-            if os.path.exists(os.path.join(path, part)):
-                self._put_file(client, path, state, part, immutable=True)
-            elif part not in state["files"]:
+            if part in state["files"]:
+                continue
+            if not os.path.exists(os.path.join(path, part)):
                 raise UploadError(f"video part {part} is missing", retryable=False)
+            source = upload_source(path, part)
+            if source is None:
+                if needs_redaction(part) and (load_meta(path, part) or {}).get("error"):
+                    raise UploadError(f"{part} could not be redacted, so it is not uploaded", retryable=False)
+                raise NotReady(part)
+            self._put_part(client, path, state, part, source, metadata, ends.get(part))
+        if not state.get("summarized"):
+            # Every part is redacted: record it in the manifest before sending it.
+            from .export import write_export
+            from .redaction import write_summary
+
+            write_summary(path, _video_parts(metadata))
+            write_export(path)
+            state["summarized"] = True
+            save_state(path, state)
         for name in PACKAGE_FILES:
             if os.path.exists(os.path.join(path, name)):
                 self._put_file(client, path, state, name)
@@ -477,6 +531,7 @@ class UploadManager(threading.Thread):
         )
         save_state(path, state)
         shutil.rmtree(os.path.join(path, "chunks"), ignore_errors=True)
+        shutil.rmtree(os.path.join(path, "redacted"), ignore_errors=True)
         logger.info(f"upload: {os.path.basename(path)} uploaded ({len(files)} files)")
 
     # Helpers ----------------------------------------------------------------
@@ -498,18 +553,39 @@ class UploadManager(threading.Thread):
         state["opened"] = True
         save_state(path, state)
 
+    def _put_part(self, client, path, state, part, source, metadata, end_perf) -> None:
+        """A (redacted) video part, its OCR layer, and how far behind live it is."""
+        if part in state["files"]:
+            return
+        if source["ocr"] and os.path.exists(source["ocr"]):
+            self._put_file(client, path, state, f"ocr/{part}.jsonl", file=source["ocr"], immutable=True)
+        self._put_file(client, path, state, part, file=source["file"], immutable=True)
+        if end_perf is not None:
+            from .export import clock_anchors, to_unix
+
+            captured = to_unix(end_perf, clock_anchors(metadata))
+            if captured is not None:
+                now = time.time()
+                timing.record(path, "chunk_uploaded", captured, now, chunk=part,
+                              lag_seconds=round(now - captured, 2))
+
     def _put_file(
-        self, client: UploadClient, path: str, state: dict, remote: str, immutable: bool = False
+        self, client: UploadClient, path: str, state: dict, remote: str,
+        immutable: bool = False, file: str | None = None,
     ) -> None:
-        """Upload <path>/<remote> unless already sent (chunks never change)."""
+        """Upload `file` (default <path>/<remote>) as <remote> unless already sent."""
         if immutable and remote in state["files"]:
             return
-        file = os.path.join(path, remote)
+        file = file or os.path.join(path, remote)
         size = os.path.getsize(file)
         sha = _sha256_file(file)
         if state["files"].get(remote, {}).get("sha256") == sha:
             return
+        start = time.time()
         client.put_file(os.path.basename(path), remote, file, sha, size)
+        end = time.time()
+        timing.record(path, "upload_file", start, end, chunk=remote, bytes=size,
+                      mb_per_s=round(size / 1e6 / max(end - start, 1e-6), 2))
         state["files"][remote] = {"sha256": sha, "size": size}
         save_state(path, state)
         self._uploaded()
